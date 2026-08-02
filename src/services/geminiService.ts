@@ -557,6 +557,14 @@ export interface EvaluationResult {
   personalizedExercises?: string[];
 }
 
+/** Compute total score as average of 5 criteria (each on 0-10 scale). Base 5 for reading completion. */
+export function computeTotalFromCriteria(criteria: EvaluationResult['criteriaScores']): number {
+  if (!criteria) return 0;
+  const { pronunciation, stress, intonation, fluency, connectedSpeech } = criteria;
+  const avg = (pronunciation + stress + intonation + fluency + connectedSpeech) / 5;
+  return Math.round(avg * 10) / 10;
+}
+
 export const evaluateSpeech = async (
   originalText: string,
   audioData: string,
@@ -583,51 +591,46 @@ BƯỚC 2: KIỂM TRA ĐỘ HOÀN THÀNH
 
 BƯỚC 3: CÔNG THỨC TÍNH ĐIỂM (THANG 10)
 ┌─────────────────────────────────────────────────┐
-│  ĐIỂM NỀN = 7.0 điểm                           │
-│  (Đọc hết bài và đúng nội dung)                 │
+│  ĐIỂM NỀN = 5.0 điểm                           │
+│  (Đọc hết bài và đúng nội dung → được 5 điểm)  │
 │                                                  │
-│  ĐIỂM CỘNG TỐI ĐA = 3.0 điểm                   │
+│  ĐIỂM CỘNG TỐI ĐA = 5.0 điểm                   │
 │  Chia đều cho 5 tiêu chí CEFR, mỗi tiêu chí    │
-│  tối đa +0.6 điểm:                              │
+│  tối đa +1.0 điểm:                              │
 │                                                  │
-│  1. Pronunciation (+0.0 ~ +0.6)                  │
+│  1. Pronunciation (+0.0 ~ +1.0)                  │
 │     Phát âm chuẩn IPA, phân biệt nguyên âm/     │
 │     phụ âm, âm cuối rõ ràng.                    │
 │                                                  │
-│  2. Word Stress (+0.0 ~ +0.6)                    │
+│  2. Word Stress (+0.0 ~ +1.0)                    │
 │     Nhấn trọng âm đúng vị trí trong từ.         │
 │                                                  │
-│  3. Intonation (+0.0 ~ +0.6)                     │
+│  3. Intonation (+0.0 ~ +1.0)                     │
 │     Ngữ điệu lên/xuống tự nhiên, phù hợp       │
 │     câu hỏi/câu kể/câu cảm thán.               │
 │                                                  │
-│  4. Fluency (+0.0 ~ +0.6)                        │
+│  4. Fluency (+0.0 ~ +1.0)                        │
 │     Đọc trôi chảy, không ngắc ngứ, tốc độ      │
 │     phù hợp.                                    │
 │                                                  │
-│  5. Connected Speech (+0.0 ~ +0.6)               │
+│  5. Connected Speech (+0.0 ~ +1.0)               │
 │     Nối âm, đồng hóa âm, nuốt âm tự nhiên      │
 │     như người bản ngữ.                           │
 │                                                  │
-│  TỔNG ĐIỂM = 7.0 + tổng điểm cộng              │
-│  (Tối thiểu 7.0, tối đa 10.0)                   │
+│  TỔNG ĐIỂM = 5.0 + tổng điểm cộng 5 tiêu chí   │
+│  (Tối thiểu 5.0, tối đa 10.0)                   │
 └─────────────────────────────────────────────────┘
 
-CÁCH QUY ĐỔI TIÊU CHÍ SANG THANG 10 (cho criteriaScores):
-- Mỗi tiêu chí chấm nội bộ trên thang 10 để hiển thị chi tiết.
-- Ví dụ: Pronunciation = 8/10, Stress = 7/10, v.v.
-- Nhưng TỔNG ĐIỂM (score) phải tính theo công thức trên (7 + bonus).
+CÁCH CHẤM TỪNG TIÊU CHÍ (criteriaScores — thang 10):
+- Mỗi tiêu chí chấm trên thang 10 để hiển thị chi tiết cho người dùng.
+- Điểm nền mỗi tiêu chí = 5 (vì đã đọc hết bài).
+- Điểm tối đa mỗi tiêu chí = 10.
+- Ví dụ: Pronunciation = 7/10, Stress = 8/10, v.v.
 
-BƯỚC 4: XẾP LOẠI CEFR
-Dựa trên tổng điểm và trình độ target:
-- 9.0-10.0: Xuất sắc (C1-C2 nếu level cao, hoặc vượt trội so với level)
-- 8.0-8.9: Giỏi (B2+)
-- 7.5-7.9: Khá (B1-B2)
-- 7.0-7.4: Đạt yêu cầu (A2-B1)
-
-BƯỚC 5: PHÂN TÍCH IPA
-- Chỉ ra 3-5 từ phát âm chưa chuẩn nhất, IPA chuẩn vs IPA người đọc.
-- Gợi ý cách sửa cụ thể (khẩu hình miệng, vị trí lưỡi, cách bật hơi).
+⚠️ QUY TẮC QUAN TRỌNG VỀ TỔNG ĐIỂM:
+- TỔNG ĐIỂM (score) = BÌNH QUÂN của 5 tiêu chí criteriaScores.
+- Ví dụ: nếu 5 tiêu chí là 7, 8, 6, 6, 5 → Tổng = (7+8+6+6+5)/5 = 6.4
+- KHÔNG tự đặt score riêng. Score PHẢI bằng trung bình cộng 5 tiêu chí.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎀 PHONG CÁCH PHẢN HỒI (Ms Lý)
@@ -636,19 +639,16 @@ BƯỚC 5: PHÂN TÍCH IPA
 - Khen trước, góp ý sau. Mang tính kiến tạo.
 - Dù điểm thấp vẫn phải khuyến khích cố gắng.
 
+⚠️ KHÔNG cần trả về các trường sau: cefrLevel, ipaAnalysis, standardSentences, personalizedExercises, strengths, improvements.
+Chỉ trả về các trường bên dưới.
+
 Output JSON:
 {
   "isComplete": boolean,
   "missingContent": string (phần bị thiếu, rỗng nếu đọc đủ),
-  "score": number (7.0 ~ 10.0, theo công thức trên),
-  "cefrLevel": string,
-  "criteriaScores": { "pronunciation": number, "stress": number, "intonation": number, "fluency": number, "connectedSpeech": number } (mỗi tiêu chí thang 10),
-  "feedback": string,
-  "ipaAnalysis": [ { "word": string, "correctIpa": string, "studentIpa": string, "tip": string } ],
-  "standardSentences": string[],
-  "personalizedExercises": string[],
-  "strengths": string[],
-  "improvements": string[]
+  "score": number (BÌNH QUÂN của 5 criteriaScores, làm tròn 1 chữ số thập phân),
+  "criteriaScores": { "pronunciation": number, "stress": number, "intonation": number, "fluency": number, "connectedSpeech": number } (mỗi tiêu chí thang 10, tối thiểu 5 nếu đọc đủ),
+  "feedback": string (nhận xét ngắn gọn, ấm áp)
 }`;
 
   // Clean MIME type for Gemini API (strip codec info, keep base type)
@@ -680,11 +680,20 @@ Output JSON:
   try {
     const result = parseSafeJson(response.text || "{}");
     
-    // Enforce scoring formula: isComplete=true → 7.0~10.0, isComplete=false → 0
+    // Compute total score as average of 5 criteria
     let finalScore = 0;
-    if (result.isComplete !== false) {
-      finalScore = Math.max(7.0, Math.min(10.0, result.score || 7.0));
-      // Round to 1 decimal place
+    const criteria = result.criteriaScores;
+    if (result.isComplete !== false && criteria) {
+      const { pronunciation = 5, stress = 5, intonation = 5, fluency = 5, connectedSpeech = 5 } = criteria;
+      // Clamp each criterion to [5, 10] range (base 5 for reading completion)
+      const clamp = (v: number) => Math.max(5, Math.min(10, v));
+      criteria.pronunciation = clamp(pronunciation);
+      criteria.stress = clamp(stress);
+      criteria.intonation = clamp(intonation);
+      criteria.fluency = clamp(fluency);
+      criteria.connectedSpeech = clamp(connectedSpeech);
+      // Total = average of 5 criteria
+      finalScore = (criteria.pronunciation + criteria.stress + criteria.intonation + criteria.fluency + criteria.connectedSpeech) / 5;
       finalScore = Math.round(finalScore * 10) / 10;
     }
 
@@ -692,14 +701,14 @@ Output JSON:
       isComplete: result.isComplete ?? true,
       missingContent: result.missingContent || "",
       score: finalScore,
-      cefrLevel: result.cefrLevel || "A1",
-      criteriaScores: result.criteriaScores,
+      cefrLevel: "",
+      criteriaScores: criteria,
       feedback: result.feedback || "Không thể đánh giá.",
-      ipaAnalysis: result.ipaAnalysis || [],
-      standardSentences: result.standardSentences || [],
-      personalizedExercises: result.personalizedExercises || [],
-      strengths: result.strengths || [],
-      improvements: result.improvements || []
+      ipaAnalysis: [],
+      standardSentences: [],
+      personalizedExercises: [],
+      strengths: [],
+      improvements: []
     };
   } catch (err: any) {
     console.error("Speech Evaluation Error:", err);

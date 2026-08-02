@@ -9,6 +9,7 @@ interface CertificateModalProps {
   onClose: () => void;
   evaluation: EvaluationResult | null;
   studentName: string;
+  studentClass: string;
   teacherName: string;
   generatedTopicName: string | null;
   topic: string;
@@ -20,7 +21,7 @@ interface CertificateModalProps {
 }
 
 export const CertificateModal: React.FC<CertificateModalProps> = ({
-  show, onClose, evaluation, studentName, teacherName,
+  show, onClose, evaluation, studentName, studentClass, teacherName,
   generatedTopicName, topic, level, isDownloading, setIsDownloading, setError, exerciseScore
 }) => {
   const certificateRef = useRef<HTMLDivElement>(null);
@@ -100,6 +101,7 @@ export const CertificateModal: React.FC<CertificateModalProps> = ({
                   </h2>
                   <div className="space-y-1">
                     <p className="text-base sm:text-xl font-medium" style={{ color: '#4B5563' }}>For outstanding performance in English Speaking</p>
+                    {studentClass && <p className="text-sm sm:text-lg font-bold italic" style={{ color: '#059669' }}>Class: {studentClass}</p>}
                     <p className="text-sm sm:text-lg font-bold italic" style={{ color: '#6B7280' }}>Topic: {generatedTopicName || topic || "General English"}</p>
                   </div>
                   <div className="inline-block px-4 sm:px-6 py-2 rounded-full text-lg sm:text-2xl font-black uppercase tracking-widest" style={{ backgroundColor: '#f0fdf4', color: '#065f46', border: '2px solid #d1fae5' }}>

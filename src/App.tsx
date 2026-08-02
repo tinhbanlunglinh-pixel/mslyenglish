@@ -56,10 +56,12 @@ export default function App() {
   // UI state
   const [isDownloading, setIsDownloading] = useState(false);
   const [studentName, setStudentName] = useState('');
+  const [studentClass, setStudentClass] = useState('');
   const [teacherName, setTeacherName] = useState('Ms Lý');
   const [showCertificate, setShowCertificate] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [currentLessonId, setCurrentLessonId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const posterRef = useRef<HTMLDivElement>(null);
 
   // Custom hooks
@@ -467,12 +469,50 @@ export default function App() {
                         isRecording={recorder.isRecording}
                         isEvaluating={recorder.isEvaluating}
                         evaluation={recorder.evaluation}
-                        studentName={studentName} teacherName={teacherName}
-                        setStudentName={setStudentName} setTeacherName={setTeacherName}
+                        studentName={studentName} teacherName={teacherName} studentClass={studentClass}
+                        setStudentName={setStudentName} setTeacherName={setTeacherName} setStudentClass={setStudentClass}
                         startRecording={recorder.startRecording}
                         stopRecording={recorder.stopRecording}
                         onShowCertificate={() => setShowCertificate(true)}
                         isExerciseCompleted={exerciseScore !== null}
+                        onSubmitResult={async () => {
+                          if (!recorder.evaluation || exerciseScore === null) {
+                            alert("Vui lòng hoàn thành luyện nói và bài tập trước khi nộp!");
+                            return;
+                          }
+                          if (!studentName.trim() || !studentClass.trim()) {
+                            alert("Vui lòng nhập Tên học sinh và Lớp trước khi nộp!");
+                            return;
+                          }
+                          setIsSubmitting(true);
+                          const lessonName = generatedTopicName || topic || "General English";
+                          const payload = {
+                            tenHocSinh: studentName,
+                            lop: studentClass,
+                            tenBaiHoc: lessonName,
+                            diemSpeaking: recorder.evaluation.score,
+                            diemBaiTap: exerciseScore
+                          };
+                          try {
+                            const response = await fetch("https://script.google.com/macros/s/AKfycbw0IPl4Jz98HY4uhwUPsmQ7tQa9PMQqEq6mc6Dzt0XbwryYOxWb7ULIihALAcZhrBRn/exec", {
+                              method: "POST",
+                              body: JSON.stringify(payload),
+                              headers: { "Content-Type": "text/plain;charset=utf-8" }
+                            });
+                            const result = await response.json();
+                            if (result.status === 'success') {
+                              alert('Nộp kết quả thành công!');
+                            } else {
+                              alert('Lỗi khi nộp kết quả: ' + result.message);
+                            }
+                          } catch (err) {
+                            console.error(err);
+                            alert('Lỗi kết nối khi nộp kết quả!');
+                          } finally {
+                            setIsSubmitting(false);
+                          }
+                        }}
+                        isSubmitting={isSubmitting}
                       />
 
                       {/* Exercise Section */}
@@ -520,12 +560,13 @@ export default function App() {
 
                       {/* Certificate Modal */}
                       <CertificateModal
-                        show={showCertificate} onClose={() => setShowCertificate(false)}
+                        show={showCertificate}
+                        onClose={() => setShowCertificate(false)}
                         evaluation={recorder.evaluation}
-                        studentName={studentName} teacherName={teacherName}
+                        studentName={studentName} teacherName={teacherName} studentClass={studentClass}
                         generatedTopicName={generatedTopicName} topic={topic} level={level}
-                        isDownloading={isDownloading} setIsDownloading={setIsDownloading} setError={setError}
-                        exerciseScore={exerciseScore}
+                        isDownloading={isDownloading} setIsDownloading={setIsDownloading}
+                        setError={setError} exerciseScore={exerciseScore}
                       />
 
                       {/* AI Prompt Debug */}
