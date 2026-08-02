@@ -9,24 +9,13 @@ interface SpeechEvaluatorProps {
   isRecording: boolean;
   isEvaluating: boolean;
   evaluation: EvaluationResult | null;
-  studentName: string;
-  studentClass: string;
-  teacherName: string;
-  setStudentName: (name: string) => void;
-  setStudentClass: (name: string) => void;
-  setTeacherName: (name: string) => void;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
-  onShowCertificate: () => void;
-  isExerciseCompleted?: boolean;
-  onSubmitResult?: () => void;
-  isSubmitting?: boolean;
 }
 
 export const SpeechEvaluator: React.FC<SpeechEvaluatorProps> = ({
   readingText, isRecording, isEvaluating, evaluation,
-  studentName, studentClass, teacherName, setStudentName, setStudentClass, setTeacherName,
-  startRecording, stopRecording, onShowCertificate, isExerciseCompleted, onSubmitResult, isSubmitting
+  startRecording, stopRecording
 }) => {
   if (!readingText) return null;
 
@@ -82,10 +71,6 @@ export const SpeechEvaluator: React.FC<SpeechEvaluatorProps> = ({
             ) : (
               <CompleteResult 
                 evaluation={evaluation} startRecording={startRecording}
-                studentName={studentName} teacherName={teacherName}
-                setStudentName={setStudentName} setTeacherName={setTeacherName}
-                onShowCertificate={onShowCertificate}
-                isExerciseCompleted={!!isExerciseCompleted}
               />
             )}
           </motion.div>
@@ -117,13 +102,7 @@ const IncompleteResult: React.FC<{ evaluation: EvaluationResult; startRecording:
 const CompleteResult: React.FC<{
   evaluation: EvaluationResult;
   startRecording: () => Promise<void>;
-  studentName: string; studentClass: string; teacherName: string;
-  setStudentName: (n: string) => void; setStudentClass: (n: string) => void; setTeacherName: (n: string) => void;
-  onShowCertificate: () => void;
-  isExerciseCompleted: boolean;
-  onSubmitResult?: () => void;
-  isSubmitting?: boolean;
-}> = ({ evaluation, startRecording, studentName, studentClass, teacherName, setStudentName, setStudentClass, setTeacherName, onShowCertificate, isExerciseCompleted, onSubmitResult, isSubmitting }) => {
+}> = ({ evaluation, startRecording }) => {
   // Compute total score as average of 5 criteria (client-side verification)
   const displayScore = evaluation.criteriaScores 
     ? computeTotalFromCriteria(evaluation.criteriaScores) 
@@ -166,53 +145,6 @@ const CompleteResult: React.FC<{
           </div>
         </div>
       )}
-
-      {/* Certificate Inputs */}
-      <div className="bg-white p-4 sm:p-6 rounded-2xl border-2 border-emerald-100 shadow-md">
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase">Tên học sinh</label>
-              <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} placeholder="Nhập tên bé..."
-                className="w-full px-3 py-2 text-xs border border-indigo-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase">Lớp</label>
-              <input type="text" value={studentClass} onChange={(e) => setStudentClass(e.target.value)} placeholder="Nhập tên lớp..."
-                className="w-full px-3 py-2 text-xs border border-indigo-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-gray-400 uppercase">Tên giáo viên</label>
-              <input type="text" value={teacherName} onChange={(e) => setTeacherName(e.target.value)} placeholder="Tên giáo viên..."
-                className="w-full px-3 py-2 text-xs border border-indigo-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
-            </div>
-          </div>
-          
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button onClick={onSubmitResult}
-              disabled={isSubmitting || !isExerciseCompleted || !studentName || !studentClass}
-              className={`flex-1 py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-lg 
-                ${(!isExerciseCompleted || !studentName || !studentClass)
-                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                  : 'bg-indigo-500 text-white hover:bg-indigo-600 hover:-translate-y-1'}`}
-            >
-              {isSubmitting ? <RefreshCw size={20} className="animate-spin" /> : <Trophy size={20} />}
-              {isSubmitting ? 'ĐANG NỘP...' : 'NỘP KẾT QUẢ BÁO CÁO'}
-            </button>
-
-            <button onClick={onShowCertificate}
-              disabled={!isExerciseCompleted || !studentName || !studentClass}
-              className={`flex-1 py-3 rounded-2xl font-black text-sm flex items-center justify-center gap-2 transition-all shadow-lg 
-                ${(isExerciseCompleted && studentName && studentClass)
-                  ? 'bg-gradient-to-r from-yellow-400 to-orange-500 text-white hover:from-yellow-500 hover:to-orange-600 hover:shadow-orange-200 hover:-translate-y-1' 
-                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
-            >
-              <Star size={20} className={(isExerciseCompleted && studentName && studentClass) ? "animate-spin-slow" : ""} />
-              XEM GIẤY CHỨNG NHẬN
-            </button>
-          </div>
-        </div>
-      </div>
     </>
   );
 };

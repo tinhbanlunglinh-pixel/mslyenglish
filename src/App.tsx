@@ -469,50 +469,8 @@ export default function App() {
                         isRecording={recorder.isRecording}
                         isEvaluating={recorder.isEvaluating}
                         evaluation={recorder.evaluation}
-                        studentName={studentName} teacherName={teacherName} studentClass={studentClass}
-                        setStudentName={setStudentName} setTeacherName={setTeacherName} setStudentClass={setStudentClass}
                         startRecording={recorder.startRecording}
                         stopRecording={recorder.stopRecording}
-                        onShowCertificate={() => setShowCertificate(true)}
-                        isExerciseCompleted={exerciseScore !== null}
-                        onSubmitResult={async () => {
-                          if (!recorder.evaluation || exerciseScore === null) {
-                            alert("Vui lòng hoàn thành luyện nói và bài tập trước khi nộp!");
-                            return;
-                          }
-                          if (!studentName.trim() || !studentClass.trim()) {
-                            alert("Vui lòng nhập Tên học sinh và Lớp trước khi nộp!");
-                            return;
-                          }
-                          setIsSubmitting(true);
-                          const lessonName = generatedTopicName || topic || "General English";
-                          const payload = {
-                            tenHocSinh: studentName,
-                            lop: studentClass,
-                            tenBaiHoc: lessonName,
-                            diemSpeaking: recorder.evaluation.score,
-                            diemBaiTap: exerciseScore
-                          };
-                          try {
-                            const response = await fetch("https://script.google.com/macros/s/AKfycbw0IPl4Jz98HY4uhwUPsmQ7tQa9PMQqEq6mc6Dzt0XbwryYOxWb7ULIihALAcZhrBRn/exec", {
-                              method: "POST",
-                              body: JSON.stringify(payload),
-                              headers: { "Content-Type": "text/plain;charset=utf-8" }
-                            });
-                            const result = await response.json();
-                            if (result.status === 'success') {
-                              alert('Nộp kết quả thành công!');
-                            } else {
-                              alert('Lỗi khi nộp kết quả: ' + result.message);
-                            }
-                          } catch (err) {
-                            console.error(err);
-                            alert('Lỗi kết nối khi nộp kết quả!');
-                          } finally {
-                            setIsSubmitting(false);
-                          }
-                        }}
-                        isSubmitting={isSubmitting}
                       />
 
                       {/* Exercise Section */}
@@ -557,6 +515,78 @@ export default function App() {
                           onComplete={handleExerciseComplete} 
                         />
                       )}
+
+                      {/* Unified Submit & Certificate Form */}
+                      <div className="w-full max-w-[800px] mt-4 bg-white p-4 sm:p-6 rounded-2xl border-2 border-emerald-100 shadow-md">
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 uppercase">Tên học sinh</label>
+                              <input type="text" value={studentName} onChange={(e) => setStudentName(e.target.value)} placeholder="Nhập tên bé..."
+                                className="w-full px-3 py-2 text-xs border border-indigo-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 uppercase">Lớp</label>
+                              <input type="text" value={studentClass} onChange={(e) => setStudentClass(e.target.value)} placeholder="Nhập tên lớp..."
+                                className="w-full px-3 py-2 text-xs border border-indigo-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                            </div>
+                            <div className="space-y-1">
+                              <label className="text-[10px] font-bold text-gray-400 uppercase">Tên giáo viên</label>
+                              <input type="text" value={teacherName} onChange={(e) => setTeacherName(e.target.value)} placeholder="Tên giáo viên..."
+                                className="w-full px-3 py-2 text-xs border border-indigo-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/20" />
+                            </div>
+                          </div>
+                          
+                          <button 
+                            onClick={async () => {
+                              if (!recorder.evaluation?.isComplete || exerciseScore === null) {
+                                alert("Vui lòng hoàn thành phần luyện nói và bài tập trước khi nộp bài!");
+                                return;
+                              }
+                              if (!studentName.trim() || !studentClass.trim()) {
+                                alert("Vui lòng nhập đầy đủ Tên học sinh và Lớp!");
+                                return;
+                              }
+                              setIsSubmitting(true);
+                              const lessonName = generatedTopicName || topic || "General English";
+                              const payload = {
+                                tenHocSinh: studentName,
+                                lop: studentClass,
+                                tenBaiHoc: lessonName,
+                                diemSpeaking: recorder.evaluation.score,
+                                diemBaiTap: exerciseScore
+                              };
+                              try {
+                                const response = await fetch("https://script.google.com/macros/s/AKfycbw0IPl4Jz98HY4uhwUPsmQ7tQa9PMQqEq6mc6Dzt0XbwryYOxWb7ULIihALAcZhrBRn/exec", {
+                                  method: "POST",
+                                  body: JSON.stringify(payload),
+                                  headers: { "Content-Type": "text/plain;charset=utf-8" }
+                                });
+                                const result = await response.json();
+                                if (result.status === 'success') {
+                                  setShowCertificate(true);
+                                } else {
+                                  alert('Lỗi khi nộp kết quả: ' + result.message);
+                                }
+                              } catch (err) {
+                                console.error(err);
+                                alert('Lỗi kết nối khi nộp kết quả!');
+                                setShowCertificate(true);
+                              } finally {
+                                setIsSubmitting(false);
+                              }
+                            }}
+                            disabled={isSubmitting || exerciseScore === null || !studentName || !studentClass || !recorder.evaluation?.isComplete}
+                            className={`w-full py-3.5 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2 transition-all shadow-lg 
+                              ${(exerciseScore !== null && studentName && studentClass && recorder.evaluation?.isComplete)
+                                ? 'bg-gradient-to-r from-indigo-500 to-brand-green text-white hover:from-indigo-600 hover:to-emerald-700 hover:-translate-y-1' 
+                                : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                          >
+                            {isSubmitting ? <RefreshCw size={24} className="animate-spin" /> : <Trophy size={24} className={exerciseScore !== null && studentName && studentClass && recorder.evaluation?.isComplete ? "animate-bounce" : ""} />}
+                            {isSubmitting ? 'ĐANG XỬ LÝ...' : 'NỘP BÀI VÀ NHẬN GIẤY CHỨNG NHẬN'}
+                          </button>
+                        </div>
+                      </div>
 
                       {/* Certificate Modal */}
                       <CertificateModal
