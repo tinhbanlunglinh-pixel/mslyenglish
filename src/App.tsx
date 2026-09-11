@@ -5,8 +5,15 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import html2canvas from 'html2canvas';
-import { generateContent, generateAudio, generateExercise } from './services/geminiService';
-import { EnglishLevel, ContentMode, VocabularyItem, ExerciseData } from './types';
+import { 
+  generateContent, 
+  generateAudio, 
+  generateExercise,
+  getAiProvider,
+  getApiKeyForProvider,
+  getSelectedModel
+} from './services/geminiService';
+import { EnglishLevel, ContentMode, VocabularyItem, ExerciseData, AiProvider } from './types';
 
 // Components
 import { Header } from './components/Header';
@@ -30,13 +37,9 @@ export default function App() {
   // Core state
   const [topic, setTopic] = useState('');
   const [level, setLevel] = useState<EnglishLevel>("Starters");
-  const [apiKey, setApiKey] = useState(() => {
-    const local = localStorage.getItem("GEMINI_API_KEY");
-    if (local && local.trim()) return local;
-    const envKey = process.env.GEMINI_API_KEY;
-    if (envKey && envKey !== "UNDEFINED" && envKey !== "MY_GEMINI_API_KEY" && envKey.trim()) return envKey;
-    return "";
-  });
+  const [provider, setProvider] = useState<AiProvider>(() => getAiProvider());
+  const [apiKey, setApiKey] = useState<string>(() => getApiKeyForProvider());
+  const [selectedModel, setSelectedModel] = useState<string>(() => getSelectedModel());
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [contentMode, setContentMode] = useState<ContentMode>("generate");
@@ -82,9 +85,10 @@ export default function App() {
     }
   }, [recorder.evaluation]);
 
-  const handleUpdateApiKey = useCallback((newKey: string) => {
+  const handleUpdateApiKey = useCallback((newKey: string, newProvider: AiProvider, newModel: string) => {
     setApiKey(newKey);
-    localStorage.setItem("GEMINI_API_KEY", newKey);
+    setProvider(newProvider);
+    setSelectedModel(newModel);
     setShowApiKeyModal(false);
     setError(null);
   }, []);
@@ -156,6 +160,8 @@ export default function App() {
         setError("Bạn đã hết hạn mức sử dụng (Quota) của API Key này. Vui lòng nhấn vào nút 'Cài đặt API Key' để đổi key mới hoặc thử lại sau.");
       } else if (errorMessage === "INVALID_KEY") {
         setError("API Key không hợp lệ hoặc đã bị vô hiệu hóa. Vui lòng kiểm tra lại trong phần 'Cài đặt API Key'.");
+      } else if (errorMessage === "MODEL_OVERLOADED") {
+        setError("Hệ thống Google AI đang tạm thời quá tải trên các model. Vui lòng nhấn 'Thử lại' sau ít giây hoặc đổi sang model khác trong Cài đặt.");
       } else if (errorMessage.includes("safety") || errorMessage.includes("Safety")) {
         setError("Nội dung hoặc hình ảnh bị chặn bởi bộ lọc an toàn. Vui lòng thử chủ đề khác.");
       } else if (errorMessage.includes("parsing") || errorMessage.includes("parse")) {
@@ -319,12 +325,19 @@ export default function App() {
       </div>
 
       {/* Header */}
-      <Header apiKey={apiKey} onOpenApiKeyModal={() => setShowApiKeyModal(true)} />
+      <Header 
+        apiKey={apiKey} 
+        provider={provider}
+        selectedModel={selectedModel}
+        onOpenApiKeyModal={() => setShowApiKeyModal(true)} 
+      />
 
       {/* API Key Modal */}
       <ApiKeyModal 
         show={showApiKeyModal} 
         currentApiKey={apiKey} 
+        initialProvider={provider}
+        initialModel={selectedModel}
         onSave={handleUpdateApiKey} 
         onClose={() => { if (apiKey) setShowApiKeyModal(false); }} 
       />

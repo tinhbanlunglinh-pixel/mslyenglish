@@ -1,6 +1,24 @@
 import { GoogleGenAI, Modality, Type } from "@google/genai";
+import { AiProvider, ModelOption } from "../types";
 
-const parseSafeJson = (text: string) => {
+export interface VocabularyItem {
+  word: string;
+  ipa: string;
+  meaning: string;
+  emoji?: string;
+}
+
+export interface ContentGenerationResult {
+  prompt: string;
+  readingText: string;
+  topicName: string;
+  translation: string;
+  vocabulary: VocabularyItem[];
+}
+
+export type EnglishLevel = "Starters" | "Movers" | "Flyers" | "A1" | "A2" | "B1" | "B2";
+
+export const parseSafeJson = (text: string) => {
   let cleaned = (text || "{}").trim();
   // Strip markdown backticks if present
   cleaned = cleaned.replace(/^```json\s*/i, '').replace(/```\s*$/, '').trim();
@@ -30,117 +48,294 @@ const parseSafeJson = (text: string) => {
   }
 };
 
-const getApiKey = () => {
-  // Try to get from localStorage first (for client-managed keys)
-  if (typeof window !== "undefined") {
-    const localKey = localStorage.getItem("GEMINI_API_KEY");
-    if (localKey && localKey.trim() !== "") return localKey.trim();
-  }
-  
-  // Fallback to environment variable
-  const envKey = process.env.GEMINI_API_KEY;
-  if (!envKey || envKey === "UNDEFINED" || envKey === "MY_GEMINI_API_KEY") {
-    console.warn("GEMINI_API_KEY is not set or using placeholder.");
-  }
-  return envKey || "";
-};
+// ============================================================
+// STORAGE & MODEL CONSTANTS (Theo api.md v4.1 & Skill Education)
+// ============================================================
 
-// We use a function to get the instance so it can pick up changes in localStorage
-const getAI = () => {
-  return new GoogleGenAI({ 
-    apiKey: getApiKey(),
-  });
-};
+export const STORAGE_KEYS = {
+  GEMINI_KEY: "gemini_api_key",
+  LEGACY_GEMINI_KEY: "GEMINI_API_KEY",
+  AGENT_PLATFORM_KEY: "agent_platform_api_key",
+  PROVIDER: "google_ai_provider",
+  PROVIDER_SOURCE: "google_ai_provider_selection_source",
+  SELECTED_MODEL: "google_ai_selected_model",
+} as const;
 
-// Model fallback chain — use only currently available, non-deprecated models
-const TEXT_MODELS = [
+// Gemini API fallback chain - GA/Stable models (api.md)
+export const GEMINI_FALLBACK_MODELS = [
+  "gemini-3.6-flash",      // Priority 1: Mặc định; Stable/GA (21/07/2026)
+  "gemini-3.5-flash",      // Priority 2: Dự phòng chất lượng cao
+  "gemini-3.5-flash-lite", // Priority 3: Dự phòng nhanh, chi phí thấp, GA (21/07/2026)
+  "gemini-3.1-flash-lite", // Priority 4: Tương thích ngược
+  "gemini-2.5-flash",      // Priority 5: Dự phòng cuối chuỗi
+] as const;
+
+// Agent Platform API models (api.md)
+export const AGENT_PLATFORM_MODELS = [
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
-];
+  "gemini-2.5-pro",
+  "gemini-3.1-pro-preview",
+] as const;
 
-// TTS-specific models (only these support responseModalities: [AUDIO] with speechConfig)
-const TTS_MODELS = [
+export const AGENT_PLATFORM_FALLBACK_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+] as const;
+
+// TTS-specific models (support responseModalities: [AUDIO] with speechConfig)
+export const TTS_MODELS = [
   "gemini-3.1-flash-tts-preview",
   "gemini-2.5-flash-preview-tts",
   "gemini-2.5-pro-preview-tts",
 ];
 
-export interface VocabularyItem {
-  word: string;
-  ipa: string;
-  meaning: string;
-  emoji?: string;
-}
+export const GEMINI_MODEL_OPTIONS: ModelOption[] = [
+  {
+    id: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash",
+    description: "Mặc định (GA); tốc độ cao, đa bước thông minh, chi phí tối ưu",
+    badge: "Khuyên dùng",
+    isDefault: true,
+  },
+  {
+    id: "gemini-3.5-flash",
+    name: "Gemini 3.5 Flash",
+    description: "Dự phòng chất lượng cao, suy luận sư phạm & ngôn ngữ tốt",
+  },
+  {
+    id: "gemini-3.5-flash-lite",
+    name: "Gemini 3.5 Flash-Lite",
+    description: "Dự phòng siêu nhanh, tiết kiệm token, xử lý tài liệu xuất sắc (GA)",
+  },
+  {
+    id: "gemini-3.1-flash-lite",
+    name: "Gemini 3.1 Flash-Lite",
+    description: "Tương thích ngược ổn định",
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Model ổn định thế hệ trước, dự phòng cuối chuỗi",
+  },
+];
 
-export interface ContentGenerationResult {
-  prompt: string;
-  readingText: string;
-  topicName: string;
-  translation: string;
-  vocabulary: VocabularyItem[];
-}
+export const AGENT_PLATFORM_MODEL_OPTIONS: ModelOption[] = [
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    description: "Mặc định cho Agent Platform; nhanh và độ ổn định cao",
+    badge: "Khuyên dùng",
+    isDefault: true,
+  },
+  {
+    id: "gemini-2.5-flash-lite",
+    name: "Gemini 2.5 Flash-Lite",
+    description: "Chi phí cực thấp, phản hồi tức thì",
+  },
+  {
+    id: "gemini-2.5-pro",
+    name: "Gemini 2.5 Pro",
+    description: "Suy luận chuyên sâu, phân tích cấu trúc phức tạp",
+  },
+  {
+    id: "gemini-3.1-pro-preview",
+    name: "Gemini 3.1 Pro (Preview)",
+    description: "Dành cho dự án được cấp quyền đặc biệt",
+  },
+];
 
-export type EnglishLevel = "Starters" | "Movers" | "Flyers" | "A1" | "A2" | "B1" | "B2";
+// ============================================================
+// API KEY VALIDATION (google-api/SKILL.md)
+// ============================================================
+// Chấp nhận cả key cũ 'AIzaSy...' và key mới 'AQ...'
+export const GOOGLE_AI_API_KEY_PATTERN = /^(?:AIzaSy|AQ)\S{8,}$/;
+
+export const isValidGoogleAiApiKey = (key: string): boolean => {
+  return GOOGLE_AI_API_KEY_PATTERN.test((key || "").trim());
+};
+
+// ============================================================
+// PROVIDER & CLIENT CONFIGURATION (api.md Section III)
+// ============================================================
+export const getAiProvider = (): AiProvider => {
+  if (typeof window !== "undefined") {
+    const provider = localStorage.getItem(STORAGE_KEYS.PROVIDER);
+    if (provider === "agent-platform" || provider === "gemini") {
+      return provider;
+    }
+  }
+  return "gemini";
+};
+
+export const getApiKeyForProvider = (provider?: AiProvider): string => {
+  const currentProvider = provider || getAiProvider();
+  if (typeof window !== "undefined") {
+    if (currentProvider === "agent-platform") {
+      const apKey = localStorage.getItem(STORAGE_KEYS.AGENT_PLATFORM_KEY);
+      if (apKey && apKey.trim()) return apKey.trim();
+    } else {
+      const geminiKey = localStorage.getItem(STORAGE_KEYS.GEMINI_KEY) || localStorage.getItem(STORAGE_KEYS.LEGACY_GEMINI_KEY);
+      if (geminiKey && geminiKey.trim()) return geminiKey.trim();
+    }
+  }
+
+  // Fallback to environment variable for Gemini
+  if (currentProvider === "gemini") {
+    const envKey = (typeof process !== "undefined" && process.env?.GEMINI_API_KEY) || "";
+    if (envKey && envKey !== "UNDEFINED" && envKey !== "MY_GEMINI_API_KEY") {
+      return envKey.trim();
+    }
+  }
+
+  return "";
+};
+
+export const getSelectedModel = (): string => {
+  const provider = getAiProvider();
+  if (typeof window !== "undefined") {
+    const saved = localStorage.getItem(STORAGE_KEYS.SELECTED_MODEL);
+    if (saved && saved.trim()) return saved.trim();
+  }
+  return provider === "agent-platform" ? "gemini-2.5-flash" : "gemini-3.6-flash";
+};
+
+export const getOrderedModels = (selectedModel?: string, provider: AiProvider = getAiProvider()): string[] => {
+  const defaultList: string[] = provider === "agent-platform"
+    ? [...AGENT_PLATFORM_FALLBACK_MODELS]
+    : [...GEMINI_FALLBACK_MODELS];
+
+  const effectiveSelected = selectedModel || getSelectedModel();
+  if (!effectiveSelected) return defaultList;
+
+  return [effectiveSelected, ...defaultList.filter((m) => m !== effectiveSelected)];
+};
 
 /**
- * Classifies an API error and throws a standardized error message.
+ * Client factory bắt buộc theo chuẩn Section III api.md
  */
-function handleApiError(err: any): never {
-  const errorMsg = err?.message || String(err);
-  console.error("Gemini API Error:", err);
-  
-  if (errorMsg.includes("429") || errorMsg.toLowerCase().includes("quota") || errorMsg.toLowerCase().includes("resource_exhausted")) {
-    throw new Error("QUOTA_EXCEEDED");
+export const createGoogleAiClient = (
+  apiKey: string,
+  provider: AiProvider = getAiProvider()
+): GoogleGenAI => {
+  if (provider === "agent-platform") {
+    return new GoogleGenAI({ vertexai: true, apiKey });
   }
-  if (errorMsg.includes("403") || errorMsg.toLowerCase().includes("api key") || errorMsg.includes("invalid")) {
-    throw new Error("INVALID_KEY");
+  return new GoogleGenAI({ apiKey });
+};
+
+export const getAI = (): GoogleGenAI => {
+  const provider = getAiProvider();
+  const apiKey = getApiKeyForProvider(provider);
+  return createGoogleAiClient(apiKey, provider);
+};
+
+// ============================================================
+// ERROR PARSER & RESILIENCE (gemini-model/SKILL.md)
+// ============================================================
+export type ApiErrorType = "QUOTA_EXCEEDED" | "MODEL_OVERLOADED" | "INVALID_KEY" | "NOT_FOUND" | "UNKNOWN";
+
+export const parseApiError = (error: any): ApiErrorType => {
+  const message = error?.message || error?.toString() || "";
+  const serialized = JSON.stringify(error) || "";
+
+  if (
+    serialized.includes("429") ||
+    message.includes("RESOURCE_EXHAUSTED") ||
+    message.toLowerCase().includes("quota")
+  ) {
+    return "QUOTA_EXCEEDED";
   }
-  throw err;
-}
+
+  if (
+    serialized.includes("503") ||
+    serialized.includes("500") ||
+    serialized.includes("504") ||
+    message.includes("UNAVAILABLE") ||
+    message.toLowerCase().includes("high demand") ||
+    message.toLowerCase().includes("overloaded") ||
+    message.toLowerCase().includes("try again later") ||
+    message.toLowerCase().includes("temporarily unavailable")
+  ) {
+    return "MODEL_OVERLOADED";
+  }
+
+  if (
+    message.includes("API_KEY_INVALID") ||
+    message.includes("401") ||
+    message.includes("PERMISSION_DENIED") ||
+    (message.includes("403") && !message.includes("Agent Platform"))
+  ) {
+    return "INVALID_KEY";
+  }
+
+  if (serialized.includes("404") || message.includes("NOT_FOUND")) {
+    return "NOT_FOUND";
+  }
+
+  return "UNKNOWN";
+};
 
 /**
  * Attempts to call generateContent with model fallback.
- * Tries each model in the fallback chain before giving up.
- * Includes a short retry delay for quota (429) errors.
+ * Uses ordered models list, handles 503 overload and transient 429 quota errors.
  */
 async function generateWithFallback(
-  models: string[],
-  params: {
+  models?: string[],
+  params?: {
     contents: any[];
     config: any;
   }
 ): Promise<any> {
+  const provider = getAiProvider();
+  const apiKey = getApiKeyForProvider(provider);
+
+  if (!apiKey) {
+    throw new Error("INVALID_KEY");
+  }
+
+  const modelChain = (models && models.length > 0) ? models : getOrderedModels();
+  const client = createGoogleAiClient(apiKey, provider);
   let lastError: any = null;
 
-  for (const model of models) {
+  for (const model of modelChain) {
     // Retry up to 2 times per model for transient quota errors
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        console.log(`Trying model: ${model} (attempt ${attempt + 1})`);
-        const response = await getAI().models.generateContent({
+        console.log(`[AI] Calling provider=${provider}, model=${model} (attempt ${attempt + 1})`);
+        const response = await client.models.generateContent({
           model,
-          contents: params.contents,
-          config: params.config,
+          contents: params!.contents,
+          config: params!.config,
         });
         return response;
       } catch (err: any) {
         lastError = err;
+        const errType = parseApiError(err);
         const errorMsg = err?.message || String(err);
-        
-        // Don't fallback for auth errors — they'll fail on all models
-        if (errorMsg.includes("403") || errorMsg.toLowerCase().includes("api key") || errorMsg.includes("invalid")) {
+
+        // Don't fallback for auth errors on Gemini API — they'll fail on all models
+        if (errType === "INVALID_KEY") {
           throw new Error("INVALID_KEY");
         }
 
-        const isQuota = errorMsg.includes("429") || errorMsg.toLowerCase().includes("quota") || errorMsg.toLowerCase().includes("resource_exhausted");
-        
-        if (isQuota && attempt === 0) {
-          // Wait 3 seconds before retrying the same model
-          console.warn(`Model ${model} hit quota limit, retrying in 3s...`);
-          await new Promise(r => setTimeout(r, 3000));
+        // For Agent Platform API, 403 PERMISSION_DENIED might be model-specific
+        if (provider === "agent-platform" && errorMsg.includes("403") && attempt === 0) {
+          console.warn(`[Agent Platform] 403 on model ${model}, trying next model...`);
+          break;
+        }
+
+        if (errType === "QUOTA_EXCEEDED" && attempt === 0) {
+          console.warn(`Model ${model} hit quota limit, waiting 3s...`);
+          await new Promise((r) => setTimeout(r, 3000));
           continue;
         }
-        
+
+        if (errType === "MODEL_OVERLOADED" || errType === "NOT_FOUND") {
+          console.warn(`Model ${model} overloaded or not found (${errType}), trying next fallback model...`);
+          break; // Move to next model
+        }
+
         console.warn(`Model ${model} failed (attempt ${attempt + 1}): ${errorMsg.substring(0, 200)}`);
         break; // Move to next model
       }
@@ -149,7 +344,11 @@ async function generateWithFallback(
 
   // All models failed
   if (lastError) {
-    handleApiError(lastError);
+    const finalErrType = parseApiError(lastError);
+    if (finalErrType === "QUOTA_EXCEEDED") throw new Error("QUOTA_EXCEEDED");
+    if (finalErrType === "MODEL_OVERLOADED") throw new Error("MODEL_OVERLOADED");
+    if (finalErrType === "INVALID_KEY") throw new Error("INVALID_KEY");
+    throw lastError;
   }
   throw new Error("All models failed. Please try again later.");
 }
@@ -243,7 +442,7 @@ export const generateContent = async (
     });
   }
 
-  const response = await generateWithFallback(TEXT_MODELS, {
+  const response = await generateWithFallback(getOrderedModels(), {
     contents: [{ role: "user", parts }],
     config: { 
       systemInstruction,
@@ -654,7 +853,7 @@ Output JSON:
   const cleanMimeType = mimeType.split(';')[0].trim() || "audio/webm";
   console.log(`[Speech Eval] Sending audio: mimeType=${cleanMimeType}, originalMime=${mimeType}, dataLength=${audioData.length}`);
 
-  const response = await generateWithFallback(TEXT_MODELS, {
+  const response = await generateWithFallback(getOrderedModels(), {
     contents: [
       {
         role: "user",
@@ -779,12 +978,11 @@ Output strictly a JSON object matching this schema:
   ]
 }`;
 
-  const response = await generateWithFallback(TEXT_MODELS, {
+  const response = await generateWithFallback(getOrderedModels(), {
     contents: [{ role: "user", parts: [{ text: `Reading Text: ${readingText}` }] }],
     config: { 
       systemInstruction,
       responseMimeType: "application/json",
-      temperature: 0.2, // keep it deterministic
       maxOutputTokens: 8192 // Ensure the 30-question JSON is not truncated early
     },
   });

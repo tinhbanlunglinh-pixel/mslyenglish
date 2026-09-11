@@ -1,6 +1,7 @@
 import React from 'react';
 import { MapPin, Phone, Facebook, MessageCircle, Users, Sparkles, ExternalLink } from 'lucide-react';
 import { BrandLogo } from './BrandLogo';
+import { VisitCounter } from './VisitCounter';
 
 export const Footer: React.FC = () => (
   <footer className="bg-brand-green-dark text-white py-10 sm:py-16 border-t-4 border-brand-yellow">
@@ -105,6 +106,14 @@ export const Footer: React.FC = () => (
             </a>
           </div>
         </div>
+      </div>
+
+      {/* Visit Counter Section */}
+      <div className="mt-10 sm:mt-14 pt-6 sm:pt-8 border-t border-white/10 flex flex-col items-center space-y-3">
+        <VisitCounter />
+        <p className="text-[11px] text-slate-400 font-medium text-center">
+          © {new Date().getFullYear()} Ms Lý English. Bản quyền thuộc về Ms Lý & Cộng đồng Giáo viên AI.
+        </p>
       </div>
     </div>
   </footer>
