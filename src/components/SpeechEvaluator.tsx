@@ -1,5 +1,15 @@
 import React from 'react';
-import { Mic, Square, RefreshCw, Star, Trophy } from 'lucide-react';
+import { 
+  Mic, 
+  Square, 
+  RefreshCw, 
+  Star, 
+  Sparkles, 
+  CheckCircle2, 
+  AlertCircle, 
+  Lightbulb, 
+  BookmarkCheck 
+} from 'lucide-react';
 import { motion } from 'motion/react';
 import { EvaluationResult } from '../types';
 import { computeTotalFromCriteria } from '../services/geminiService';
@@ -66,7 +76,7 @@ export const SpeechEvaluator: React.FC<SpeechEvaluatorProps> = ({
 
         {evaluation && (
           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="w-full space-y-4">
-            {!evaluation.isComplete ? (
+            {(!evaluation.isComplete && (!evaluation.score || evaluation.score === 0)) ? (
               <IncompleteResult evaluation={evaluation} startRecording={startRecording} />
             ) : (
               <CompleteResult 
@@ -99,52 +109,183 @@ const IncompleteResult: React.FC<{ evaluation: EvaluationResult; startRecording:
   </div>
 );
 
+const CRITERIA_CONFIG = [
+  {
+    key: 'pronunciation' as const,
+    label: 'Phát âm',
+    subLabel: 'Pronunciation',
+    icon: '🗣️',
+    description: 'Nguyên âm, phụ âm & độ tròn vành rõ chữ'
+  },
+  {
+    key: 'stress' as const,
+    label: 'Trọng âm',
+    subLabel: 'Stress',
+    icon: '🎯',
+    description: 'Nhấn âm từ & câu đúng vị trí'
+  },
+  {
+    key: 'intonation' as const,
+    label: 'Ngữ điệu',
+    subLabel: 'Intonation',
+    icon: '🎵',
+    description: 'Lên xuống giọng tự nhiên theo ngữ cảnh'
+  },
+  {
+    key: 'fluency' as const,
+    label: 'Độ trôi chảy',
+    subLabel: 'Fluency',
+    icon: '⚡',
+    description: 'Tốc độ vừa phải, ngắt nghỉ đúng nhịp'
+  },
+  {
+    key: 'connectedSpeech' as const,
+    label: 'Nối âm & Âm đuôi',
+    subLabel: 'Connected Speech',
+    icon: '🔗',
+    description: 'Bật âm đuôi /s/, /t/, /d/ & nối âm mượt mà'
+  },
+];
+
 const CompleteResult: React.FC<{
   evaluation: EvaluationResult;
   startRecording: () => Promise<void>;
 }> = ({ evaluation, startRecording }) => {
-  // Compute total score as average of 5 criteria (client-side verification)
-  const displayScore = evaluation.criteriaScores 
-    ? computeTotalFromCriteria(evaluation.criteriaScores) 
-    : evaluation.score;
+  // Điểm tổng: hiển thị điểm tổng duy nhất, không hiển thị điểm số thành phần
+  const displayScore = typeof evaluation.score === 'number' && evaluation.score > 0
+    ? evaluation.score 
+    : (evaluation.criteriaScores ? computeTotalFromCriteria(evaluation.criteriaScores) : 0);
 
   return (
-    <>
-      {/* Score - without CEFR badge */}
-      <div className="flex items-center justify-between bg-gradient-to-br from-white to-emerald-50 p-4 sm:p-6 rounded-2xl border-2 border-emerald-200 shadow-md">
+    <div className="w-full space-y-3.5">
+      {/* 1. Tổng điểm duy nhất */}
+      <div className="flex items-center justify-between bg-gradient-to-br from-white to-emerald-50 p-4 sm:p-5 rounded-2xl border-2 border-emerald-200 shadow-md">
         <div className="flex items-center gap-3 sm:gap-4">
-          <div className="w-12 h-12 sm:w-16 sm:h-16 bg-brand-yellow rounded-2xl flex items-center justify-center text-white shadow-lg shadow-brand-yellow/20 rotate-3">
+          <div className="w-12 h-12 sm:w-14 sm:h-14 bg-brand-yellow rounded-2xl flex items-center justify-center text-white shadow-lg shadow-brand-yellow/20 rotate-3 shrink-0">
             <Star size={28} fill="currentColor" />
           </div>
           <div>
-            <div className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Tổng điểm</div>
-            <div className="flex items-center gap-3">
-              <div className="text-3xl sm:text-4xl font-black text-emerald-700">{displayScore}</div>
+            <div className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">Tổng điểm luyện nói</div>
+            <div className="flex items-baseline gap-1">
+              <span className="text-3xl sm:text-4xl font-black text-emerald-700">{displayScore}</span>
+              <span className="text-sm font-bold text-emerald-500">/ 10</span>
             </div>
           </div>
         </div>
-        <button onClick={startRecording} className="px-3 sm:px-4 py-2 bg-white text-emerald-600 border-2 border-emerald-100 rounded-xl font-bold text-xs sm:text-sm hover:border-brand-green transition-all shadow-sm active:scale-95">Thử lại</button>
+        <button 
+          onClick={startRecording} 
+          className="flex items-center gap-1.5 px-3.5 sm:px-4 py-2.5 bg-white text-emerald-700 border-2 border-emerald-200 rounded-xl font-bold text-xs sm:text-sm hover:border-brand-green hover:bg-emerald-50/50 transition-all shadow-sm active:scale-95"
+        >
+          <RefreshCw size={14} />
+          <span>Luyện lại</span>
+        </button>
       </div>
 
-      {/* Criteria Scores */}
-      {evaluation.criteriaScores && (
-        <div className="space-y-2">
-          <div className="flex items-center justify-between px-1">
-            <span className="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">Tiêu chí chấm điểm</span>
-            <span className="text-[9px] font-medium text-slate-400 italic">Điều kiện: Đọc đủ & đúng 100% nội dung</span>
+      {/* 2. Có 1 câu nhận xét chung từ cô Lý */}
+      {evaluation.feedback && (
+        <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-emerald-50/90 via-teal-50/80 to-emerald-50/90 border-2 border-emerald-200 shadow-xs flex items-start gap-3">
+          <div className="w-8 h-8 rounded-xl bg-brand-green text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+            <Sparkles size={16} />
           </div>
-          <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 bg-white p-3 sm:p-4 rounded-2xl border-2 border-emerald-50 shadow-sm">
-            {Object.entries(evaluation.criteriaScores).map(([key, score]) => (
-              <div key={key} className="text-center p-2 sm:p-3 rounded-xl bg-emerald-50/30 border border-emerald-100">
-                <div className="text-[8px] sm:text-[9px] font-bold text-emerald-400 uppercase leading-tight mb-1">
-                  {key === 'pronunciation' ? 'Phát âm' : key === 'stress' ? 'Trọng âm' : key === 'intonation' ? 'Ngữ điệu' : key === 'fluency' ? 'Trôi chảy' : 'Nối âm'}
-                </div>
-                <div className="text-lg font-black text-emerald-600">{score}</div>
-              </div>
-            ))}
+          <div className="flex-1 min-w-0">
+            <div className="text-[10px] font-black text-emerald-800 uppercase tracking-wider mb-1">
+              Nhận xét chung từ cô Lý
+            </div>
+            <p className="text-xs sm:text-sm text-emerald-950 font-semibold leading-relaxed italic">
+              "{evaluation.feedback}"
+            </p>
           </div>
         </div>
       )}
-    </>
+
+      {/* 3. 5 thẻ nhận xét riêng theo các mục nhận xét định tính chuẩn Cambridge */}
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-1.5 text-xs font-black text-emerald-800 uppercase tracking-wider">
+            <BookmarkCheck size={16} className="text-brand-green" />
+            <span>Nhận xét định tính chuẩn Cambridge</span>
+          </div>
+          <span className="text-[10px] text-slate-400 font-medium italic">5 tiêu chí sư phạm</span>
+        </div>
+
+        <div className="space-y-2">
+          {CRITERIA_CONFIG.map((crit) => {
+            const comment = evaluation.criteriaFeedback?.[crit.key];
+            if (!comment) return null;
+            return (
+              <div 
+                key={crit.key} 
+                className="p-3.5 rounded-2xl bg-white border-2 border-emerald-100 shadow-xs hover:border-brand-green/40 transition-all space-y-1.5"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="text-base">{crit.icon}</span>
+                    <span className="text-xs sm:text-sm font-black text-emerald-900">{crit.label}</span>
+                    <span className="text-[11px] text-emerald-600 font-semibold">({crit.subLabel})</span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 hidden sm:inline">{crit.description}</span>
+                </div>
+                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium pl-6">
+                  {comment}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* 4. Chi tiết lỗi sai & Hướng dẫn sửa cụ thể */}
+      <div className="space-y-2.5">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-1.5 text-xs font-black text-rose-800 uppercase tracking-wider">
+            <AlertCircle size={16} className="text-rose-500" />
+            <span>Chi tiết lỗi sai & Hướng dẫn sửa</span>
+          </div>
+          <span className="text-[10px] text-slate-400 font-medium italic">Chỉ rõ sai ở đâu & Cần sửa gì</span>
+        </div>
+
+        {evaluation.detailedErrors && evaluation.detailedErrors.length > 0 ? (
+          <div className="space-y-2.5">
+            {evaluation.detailedErrors.map((err, idx) => (
+              <div 
+                key={idx}
+                className="p-3.5 rounded-2xl bg-white border-2 border-rose-100 shadow-sm space-y-2.5 hover:border-rose-200 transition-all"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-lg bg-rose-100 text-rose-800 font-black text-xs sm:text-sm tracking-wide border border-rose-200">
+                    "{err.word}"
+                  </span>
+                  <span className="text-[11px] text-slate-500 font-medium">Từ con cần lưu ý</span>
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex items-start gap-2 bg-rose-50/80 p-2.5 rounded-xl text-rose-950 border border-rose-200/60">
+                    <span className="font-bold text-rose-700 shrink-0">📍 Sai ở đâu:</span>
+                    <span className="font-medium leading-relaxed">{err.errorDetail}</span>
+                  </div>
+                  <div className="flex items-start gap-2 bg-emerald-50/80 p-2.5 rounded-xl text-emerald-950 border border-emerald-200/80">
+                    <Lightbulb size={16} className="text-amber-500 shrink-0 mt-0.5" />
+                    <div>
+                      <span className="font-bold text-emerald-800 mr-1">🛠️ Cần sửa gì:</span>
+                      <span className="font-medium leading-relaxed">{err.howToFix}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200 text-center space-y-1.5 shadow-sm">
+            <div className="flex items-center justify-center gap-2 text-emerald-800 font-bold text-xs sm:text-sm">
+              <CheckCircle2 size={18} className="text-brand-green" />
+              <span>Rất tốt! Con đọc đúng nội dung và không có lỗi sai lớn</span>
+            </div>
+            <p className="text-xs text-slate-600 font-medium">
+              Con đã đọc bài rất chuẩn và tự tin. Hãy tiếp tục giữ vững phong độ nhé! 🎉
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };

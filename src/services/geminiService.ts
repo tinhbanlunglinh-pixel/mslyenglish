@@ -368,7 +368,7 @@ export const generateContent = async (
   - DO NOT summarize, simplify, shorten, paraphrase, or rewrite ANY part of the text.
   - DO NOT apply the Cambridge Level word count limits below. The word count limits ONLY apply when mode is 'generate'.
   - The ONLY modifications allowed: remove ISBNs, publisher names, page numbers, copyright footers — pure noise that is not educational content.
-  - If the input is from an image, perform high-accuracy OCR to extract ALL English text verbatim.
+  - If the input is from an image, perform high-accuracy OCR to extract ALL English text verbatim. Pay extreme attention to apostrophes: e.g. "Its name is Buddy" uses the possessive "Its" (no apostrophe), DO NOT add an apostrophe.
   - The "readingText" output MUST contain every sentence, every paragraph from the user's input. Missing even one sentence is UNACCEPTABLE.
   - The "translation" must be a Vietnamese translation of the COMPLETE readingText, not a summary.
   ` 
@@ -380,6 +380,13 @@ export const generateContent = async (
 
   const systemInstruction = `You are a highly skilled, expert English teacher and educational content creator for English learners. You strictly follow the CEFR (Common European Framework of Reference for Languages) and Cambridge English Qualifications standards (Starters, Movers, Flyers, KET, PET).
   ${useInputInstructions}
+
+  🚨 MANDATORY ENGLISH SPELLING & GRAMMAR RULES (ZERO TOLERANCE FOR GRAMMATICAL ERRORS):
+  - Strict distinction between possessive determiners and contractions:
+    * Always use "Its" (WITHOUT an apostrophe) as a possessive adjective: "Its name is Buddy.", "with its red ball.", "its brown fur.". NEVER write "It's name" (which incorrectly means "It is name")!
+    * Only use "It's" (WITH an apostrophe) when it is a contraction of "It is" or "It has" (e.g., "It's a happy dog!").
+    * Never confuse "your" vs "you're", "their" vs "they're" vs "there".
+    * Ensure 100% standard punctuation, capitalization, and flawless British/American spelling.
   Your task is to generate:
   1. An image generation prompt for a highly realistic, crystal clear, and engaging educational illustration. The prompt MUST include quality keywords such as: "photorealistic, highly detailed, perfect anatomy, sharp focus, 8k UHD resolution, National Geographic photography style, professional lighting, vivid colors, no distortion, anatomically correct, full body in frame, DSLR quality". Avoid abstract, blurry, cartoon, or distorted styles.
   2. A reading passage in English appropriate for the level: ${level}.
@@ -731,6 +738,20 @@ export const generateAudio = async (text: string, level: EnglishLevel): Promise<
   return BROWSER_TTS_SIGNAL;
 };
 
+export interface DetailedError {
+  word: string;
+  errorDetail: string;
+  howToFix: string;
+}
+
+export interface CriteriaFeedback {
+  pronunciation: string;
+  stress: string;
+  intonation: string;
+  fluency: string;
+  connectedSpeech: string;
+}
+
 export interface EvaluationResult {
   score: number;
   feedback: string;
@@ -746,6 +767,8 @@ export interface EvaluationResult {
     fluency: number;
     connectedSpeech: number;
   };
+  criteriaFeedback?: CriteriaFeedback;
+  detailedErrors?: DetailedError[];
   ipaAnalysis?: {
     word: string;
     correctIpa: string;
@@ -770,83 +793,57 @@ export const evaluateSpeech = async (
   level: EnglishLevel,
   mimeType: string = "audio/webm"
 ): Promise<EvaluationResult> => {
-  const systemInstruction = `Bạn là Ms Lý — giáo viên tiếng Anh, đóng vai giám khảo chấm phát âm theo chuẩn Khung tham chiếu Châu Âu (CEFR).
-Bạn nghe audio thu âm từ micro trình duyệt (có thể là giọng trẻ em hoặc người lớn). Chất lượng audio có thể không hoàn hảo — hãy cố gắng HẾT SỨC để nhận diện nội dung người đọc nói.
+  const systemInstruction = `Bạn là Ms Lý — giáo viên tiếng Anh nhiệt huyết, chuyên rèn phát âm theo chuẩn CEFR & Cambridge (Starters, Movers, Flyers, KET, PET).
+Bạn nghe audio thu âm giọng học sinh đọc bài đọc gốc (Original Text).
 
-🎯 NHIỆM VỤ: Nghe audio → So sánh với bài gốc (Original Text) → Chấm điểm thang 10.
+🎯 NGUYÊN TẮC QUAN TRỌNG NHẤT VỀ CHẤM ĐIỂM & NHẬN XÉT:
+1. KHÔNG QUÁ NGHIÊM NGẶT VỀ NỘI DUNG — CHỈ CẦN ĐÚNG NỘI DUNG LÀ CHẤM ĐIỂM:
+   - Chỉ cần học sinh đọc theo nội dung bài đọc gốc (dù đọc vấp, đọc chậm, phát âm sai một số từ, hoặc lỡ đọc lướt qua 1-2 từ) thì VẪN LUÔN LUÔN CHẤM ĐIỂM NGAY ("isComplete": true).
+   - Tuyệt đối KHÔNG bắt học sinh đọc lại hoặc đánh trượt ("isComplete": false) trừ khi file thu âm hoàn toàn im lặng, không có tiếng nói hoặc nói chuyện hoàn toàn không liên quan đến bài đọc.
+   - Điểm tổng: Đánh giá tổng quan, hào phóng và khích lệ (thường từ 7.0 đến 9.5 điểm) để động viên tinh thần của trẻ.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-📋 QUY TRÌNH CHẤM ĐIỂM
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+2. SAI Ở ĐÂU THÌ ĐƯA VÀO PHẦN NHẬN XÉT CHI TIẾT ĐỂ HỌC SINH SỬA LỖI:
+   - Mọi lỗi phát âm sai, nuốt âm đuôi, nhầm âm, quên âm gió, đọc ngập ngừng hay từ đọc sót ĐỀU ĐƯỢC ĐƯA VÀO "detailedErrors" và "criteriaFeedback" để hướng dẫn học sinh sửa lỗi.
+   - "detailedErrors" phải chỉ CỰC KỲ RÕ RÀNG:
+     * "word": Từ gốc trong bài đọc mà học sinh đọc sai hoặc bỏ sót (ví dụ: "fast", "garden", "friends", "walked").
+     * "errorDetail": Nêu rõ SAI Ở ĐÂU (ví dụ: "Con quên bật âm đuôi /t/ ở cuối từ", "Con đọc nhầm âm /ɜː/ thành /u/", "Con quên phát âm âm đuôi số nhiều /z/", "Con đọc lướt qua chưa phát âm từ này").
+     * "howToFix": Nêu rõ CẦN SỬA GÌ (hướng dẫn cụ thể, phiên âm IPA chuẩn, cách đặt khẩu hình miệng hoặc mẹo nhớ dễ hiểu từ cô Lý. Ví dụ: "Phiên âm chuẩn là /fɑːst/. Con hãy cắn nhẹ hai hàm răng và bật âm 't' gió thật dứt khoát nhé!").
 
-BƯỚC 1: NGHE VÀ NHẬN DIỆN
-- ⚠️ QUAN TRỌNG: Người đọc thường là trẻ em. Dù phát âm sai, ngọng, hoặc khó nghe, HÃY CỐ GẮNG ĐOÁN và ghi nhận là đã đọc.
-- TUYỆT ĐỐI KHÔNG đánh "isComplete: false" chỉ vì audio bị ồn, nhỏ hoặc phát âm kém. CHỈ trả về "isComplete: false" nếu file hoàn toàn không có tiếng người.
-- Nếu nghe được bất kỳ từ nào tương tự trong bài → coi như đã đọc phần đó. Nếu đọc được >50% nội dung → "isComplete": true.
-
-BƯỚC 2: KIỂM TRA ĐỘ HOÀN THÀNH
-- Đọc được >50% nội dung bài gốc → "isComplete": true → chấm điểm.
-- Chỉ khi KHÔNG CÓ TIẾNG NGƯỜI hoặc bỏ sót >50% nội dung → "isComplete": false, "score": 0.
-
-BƯỚC 3: CÔNG THỨC TÍNH ĐIỂM (THANG 10)
-┌─────────────────────────────────────────────────┐
-│  ĐIỂM NỀN = 5.0 điểm                           │
-│  (Đọc đủ bài → mặc định các tiêu chí từ 5 điểm) │
-│                                                  │
-│  ĐIỂM CỘNG TỐI ĐA = 5.0 điểm                   │
-│  Chia đều cho 5 tiêu chí CEFR, mỗi tiêu chí    │
-│  chấm từ 5.0 đến 10.0:                          │
-│                                                  │
-│  1. Pronunciation (5.0 ~ 10.0)                   │
-│     Phát âm chuẩn IPA, phân biệt nguyên âm/     │
-│     phụ âm, âm cuối rõ ràng.                    │
-│                                                  │
-│  2. Word Stress (5.0 ~ 10.0)                     │
-│     Nhấn trọng âm đúng vị trí trong từ.         │
-│                                                  │
-│  3. Intonation (5.0 ~ 10.0)                      │
-│     Ngữ điệu lên/xuống tự nhiên, phù hợp       │
-│     câu hỏi/câu kể/câu cảm thán.               │
-│                                                  │
-│  4. Fluency (5.0 ~ 10.0)                         │
-│     Đọc trôi chảy, không ngắc ngứ, tốc độ      │
-│     phù hợp.                                    │
-│                                                  │
-│  5. Connected Speech (5.0 ~ 10.0)                │
-│     Nối âm, đồng hóa âm, nuốt âm tự nhiên      │
-│     như người bản ngữ.                           │
-│                                                  │
-│  TỔNG ĐIỂM = BÌNH QUÂN của 5 tiêu chí trên     │
-│  (Tối thiểu 5.0, tối đa 10.0)                   │
-└─────────────────────────────────────────────────┘
-
-CÁCH CHẤM TỪNG TIÊU CHÍ (criteriaScores — thang 10):
-- Mỗi tiêu chí chấm trên thang 10 để hiển thị chi tiết cho người dùng.
-- Điểm tối thiểu mỗi tiêu chí = 5.0 (không cho dưới 5 nếu đã đọc đủ bài).
-- Điểm tối đa mỗi tiêu chí = 10.0.
-- Ví dụ: Pronunciation = 7, Stress = 8, v.v.
-
-⚠️ QUY TẮC QUAN TRỌNG VỀ TỔNG ĐIỂM:
-- TỔNG ĐIỂM (score) = BÌNH QUÂN của 5 tiêu chí criteriaScores.
-- Châm chước cho trẻ em: Hãy cho điểm cao tay một chút để động viên các bé (ví dụ điểm 7-9 là phổ biến).
+3. NHẬN XÉT CHUNG & NHẬN XÉT ĐỊNH TÍNH THEO 5 MỤC CHUẨN CAMBRIDGE:
+   - feedback: ĐÚNG 1 CÂU nhận xét chung ngắn gọn, ấm áp, khích lệ nỗ lực của con (ví dụ: "Chào con, cô Lý khen con đã hoàn thành bài đọc rất tự tin với giọng đọc to, rõ ràng!").
+   - criteriaFeedback: Nhận xét riêng từng mục định tính chuẩn Cambridge (tuyệt đối KHÔNG chấm điểm con, mỗi mục có lời nhận xét riêng biệt):
+     * pronunciation (Phát âm): Lời nhận xét riêng về nguyên âm, phụ âm, phát âm tròn vành rõ chữ.
+     * stress (Trọng âm): Lời nhận xét riêng về cách nhấn trọng âm ở các từ 2-3 âm tiết và trọng âm câu.
+     * intonation (Ngữ điệu): Lời nhận xét riêng về ngữ điệu lên/xuống giọng tự nhiên.
+     * fluency (Độ trôi chảy): Lời nhận xét riêng về tốc độ đọc, độ liền mạch và cách ngắt nghỉ câu.
+     * connectedSpeech (Nối âm & Âm đuôi): Lời nhận xét riêng về việc bật âm đuôi (ending sounds /s/, /t/, /d/, /k/...) và nối âm.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 🎀 PHONG CÁCH PHẢN HỒI (Ms Lý)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Ấm áp, yêu thương, luôn bắt đầu bằng "Chào con, cô Lý đây!"
-- Khen trước, góp ý sau. Dù phát âm chưa tốt cũng phải tìm ra điểm để khen.
-- Dù điểm thấp vẫn phải khuyến khích cố gắng, tuyệt đối không chê bai.
+- Ấm áp, yêu thương, luôn bắt đầu bằng: "Chào con, cô Lý đây!"
+- Khen ngợi điểm nỗ lực trước, sau đó chỉ rõ lỗi sai ở đâu và hướng dẫn sửa từng chút một.
 
-⚠️ KHÔNG cần trả về các trường sau: cefrLevel, ipaAnalysis, standardSentences, personalizedExercises, strengths, improvements.
-Chỉ trả về các trường bên dưới.
-
-Output JSON:
+Output strictly JSON:
 {
-  "isComplete": boolean,
-  "missingContent": string (phần bị thiếu, rỗng nếu đọc đủ),
-  "score": number (BÌNH QUÂN của 5 criteriaScores, làm tròn 1 chữ số thập phân),
-  "criteriaScores": { "pronunciation": number, "stress": number, "intonation": number, "fluency": number, "connectedSpeech": number } (mỗi tiêu chí 5-10),
-  "feedback": string (nhận xét ngắn gọn, ấm áp)
+  "isComplete": true,
+  "missingContent": string (để rỗng "" nếu học sinh có đọc bài),
+  "score": number (điểm tổng 0-10, ví dụ 7.5, 8.2, 9.0),
+  "feedback": string (đúng 1 câu nhận xét chung ngắn gọn, ấm áp từ cô Lý),
+  "criteriaFeedback": {
+    "pronunciation": string (nhận xét riêng về Phát âm),
+    "stress": string (nhận xét riêng về Trọng âm),
+    "intonation": string (nhận xét riêng về Ngữ điệu),
+    "fluency": string (nhận xét riêng về Độ trôi chảy),
+    "connectedSpeech": string (nhận xét riêng về Nối âm & Âm đuôi)
+  },
+  "detailedErrors": [
+    {
+      "word": string,
+      "errorDetail": string (sai ở đâu),
+      "howToFix": string (cần sửa gì)
+    }
+  ]
 }`;
 
   // Clean MIME type for Gemini API (strip codec info, keep base type)
@@ -858,7 +855,7 @@ Output JSON:
       {
         role: "user",
         parts: [
-          { text: `Original Text (bài gốc): ${originalText}\nTarget Level: ${level}\n\nHãy nghe kỹ file audio bên dưới. Người đọc đang đọc bài gốc ở trên. BẮT BUỘC PHẢI TÌM CÁCH NHẬN DIỆN GIỌNG NÓI DÙ CÓ HƠI KHÓ NGHE. Chấm điểm theo công thức: Điểm nền 5 + trung bình cộng 5 tiêu chí (mỗi tiêu chí 5-10 điểm). KHUYẾN KHÍCH CHO ĐIỂM CAO ĐỂ ĐỘNG VIÊN TRẺ EM.` },
+          { text: `Original Text (bài đọc gốc):\n"""\n${originalText}\n"""\n\nTarget Level: ${level}\n\nNHIỆM VỤ CỦA CÔ LÝ:\n- Hãy nghe audio thu âm học sinh đọc bài đọc gốc ở trên.\n- NGUYÊN TẮC: Không quá nghiêm ngặt về nội dung. Chỉ cần học sinh có đọc bài đúng nội dung là CHẤM ĐIỂM NGAY (thang điểm 10, khích lệ từ 7.0 đến 9.5).\n- SAI Ở ĐÂU THÌ ĐƯA HẾT VÀO NHẬN XÉT: Bất kỳ từ nào phát âm sai, nuốt âm đuôi, nhầm âm hay đọc sót hãy đưa vào "detailedErrors" (nêu rõ SAI Ở ĐÂU và CẦN SỬA GÌ) để học sinh sửa lỗi.\n- Nhận xét chi tiết theo 5 tiêu chí vào "criteriaFeedback".` },
           {
             inlineData: {
               mimeType: cleanMimeType,
@@ -878,30 +875,36 @@ Output JSON:
   try {
     const result = parseSafeJson(response.text || "{}");
     
-    // Compute total score as average of 5 criteria
-    let finalScore = 0;
+    // Compute total score as average of criteria if score not directly provided
+    let finalScore = typeof result.score === 'number' ? result.score : 0;
     const criteria = result.criteriaScores;
-    if (result.isComplete !== false && criteria) {
-      const { pronunciation = 5, stress = 5, intonation = 5, fluency = 5, connectedSpeech = 5 } = criteria;
-      // Clamp each criterion to [5, 10] range (base 5 for reading completion)
-      const clamp = (v: number) => Math.max(5, Math.min(10, v));
-      criteria.pronunciation = clamp(pronunciation);
-      criteria.stress = clamp(stress);
-      criteria.intonation = clamp(intonation);
-      criteria.fluency = clamp(fluency);
-      criteria.connectedSpeech = clamp(connectedSpeech);
-      // Total = average of 5 criteria
-      finalScore = (criteria.pronunciation + criteria.stress + criteria.intonation + criteria.fluency + criteria.connectedSpeech) / 5;
-      finalScore = Math.round(finalScore * 10) / 10;
+    if (finalScore === 0 && criteria) {
+      finalScore = computeTotalFromCriteria(criteria);
     }
+    // Đảm bảo luôn có điểm khích lệ nếu học sinh có đọc bài
+    if (finalScore === 0 && (result.feedback || (result.detailedErrors && result.detailedErrors.length > 0))) {
+      finalScore = 7.5;
+    }
+    finalScore = Math.round(finalScore * 10) / 10;
+
+    // Không quá nghiêm ngặt: chỉ khi hoàn toàn không có âm thanh / điểm 0 thì mới coi là incomplete
+    const isComplete = result.isComplete !== false || finalScore > 0;
 
     return {
-      isComplete: result.isComplete ?? true,
+      isComplete,
       missingContent: result.missingContent || "",
       score: finalScore,
       cefrLevel: "",
       criteriaScores: criteria,
-      feedback: result.feedback || "Không thể đánh giá.",
+      feedback: result.feedback || "Chào con, cô Lý đây! Con đã rất cố gắng hoàn thành bài đọc hôm nay.",
+      criteriaFeedback: result.criteriaFeedback || {
+        pronunciation: "Con phát âm các từ tương đối rõ ràng, chú ý bật rõ hơn các âm cuối (ending sounds).",
+        stress: "Con đã bắt đầu biết nhấn trọng âm ở các từ quan trọng.",
+        intonation: "Ngữ điệu đọc tự nhiên và có cảm xúc.",
+        fluency: "Tốc độ đọc vừa phải, chú ý ngắt nghỉ đúng theo dấu câu.",
+        connectedSpeech: "Con hãy chú ý bật âm gió /s/ và âm đuôi /t/, /d/ để câu nói chuẩn hơn nhé!"
+      },
+      detailedErrors: Array.isArray(result.detailedErrors) ? result.detailedErrors : [],
       ipaAnalysis: [],
       standardSentences: [],
       personalizedExercises: [],
@@ -927,6 +930,7 @@ export const generateExercise = async (
 ): Promise<ExerciseData> => {
   const systemInstruction = `You are a highly skilled English pedagogical expert and school teacher. Create exactly 30 exercise questions based ON THE PROVIDED READING TEXT.
 The student level is: ${level}. You must pay close attention to grammar, logical structures, correct syntax, and ensure all questions and correctAnswers are 100% grammatically correct.
+STRICT GRAMMAR RULES: Strictly distinguish possessives ("Its name", "its ball" - NO apostrophe) from contractions ("It's" = "It is"). Ensure zero grammar/spelling errors.
 
 The questions must be structured exactly as requested in the JSON format.
 There must be EXACTLY:
