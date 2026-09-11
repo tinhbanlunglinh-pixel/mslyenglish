@@ -5,6 +5,7 @@ import { getClasses, saveAssignment, getAssignments, deleteAssignment, getTodayS
 import { VocabularySection } from '../VocabularySection';
 import { MegaChallenge } from '../MegaChallenge';
 import { UploadZone } from '../UploadZone';
+import { exportAssignmentToWord, exportAssignmentToPdf } from '../../utils/documentExport';
 
 interface AssignmentCreatorProps {
   onOpenSettings: () => void;
@@ -681,11 +682,11 @@ export const AssignmentCreator: React.FC<AssignmentCreatorProps> = ({
                 </div>
               </div>
 
-              <div className="pt-2">
+              <div className="pt-2 space-y-2.5">
                 <button
                   onClick={handlePublishAssignment}
                   disabled={publishedSuccess || (!isAllMode && selectedClassIds.length === 0)}
-                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-2xl font-black text-xl shadow-xl transition-all transform active:scale-98 flex items-center justify-center gap-2"
+                  className="w-full py-4 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-2xl font-black text-xl shadow-xl transition-all transform active:scale-98 flex items-center justify-center gap-2 cursor-pointer"
                 >
                   {publishedSuccess ? (
                     <>
@@ -697,6 +698,53 @@ export const AssignmentCreator: React.FC<AssignmentCreatorProps> = ({
                     </>
                   )}
                 </button>
+
+                {/* CÁC NÚT TẢI FILE WORD & XUẤT FILE PDF */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportAssignmentToWord({
+                        id: `assign_${Date.now()}`,
+                        title: assignmentTitle.trim() || 'Bài tập tiếng Anh Mrs. Dung',
+                        topic: lessonPlan.topic || assignmentTitle.trim(),
+                        assignedDate,
+                        dueDate,
+                        targetClassId: isAllMode ? 'ALL' : (selectedClasses[0]?.id || 'ALL'),
+                        targetClassName: isAllMode ? 'Tất cả các lớp' : selectedClasses.map(c => c.name).join(', '),
+                        teacherNote,
+                        lessonPlan,
+                        createdAt: new Date().toISOString()
+                      }, true);
+                    }}
+                    className="py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    title="Tải xuống đề bài và đáp án chi tiết định dạng Word (.doc)"
+                  >
+                    <span>📄</span> TẢI FILE WORD (.DOC)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      exportAssignmentToPdf({
+                        id: `assign_${Date.now()}`,
+                        title: assignmentTitle.trim() || 'Bài tập tiếng Anh Mrs. Dung',
+                        topic: lessonPlan.topic || assignmentTitle.trim(),
+                        assignedDate,
+                        dueDate,
+                        targetClassId: isAllMode ? 'ALL' : (selectedClasses[0]?.id || 'ALL'),
+                        targetClassName: isAllMode ? 'Tất cả các lớp' : selectedClasses.map(c => c.name).join(', '),
+                        teacherNote,
+                        lessonPlan,
+                        createdAt: new Date().toISOString()
+                      }, true);
+                    }}
+                    className="py-3 px-4 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-black text-xs sm:text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    title="Mở trình in ấn A4 hoặc bấm Lưu dưới dạng PDF"
+                  >
+                    <span>🖨️</span> XUẤT FILE PDF / IN ĐỀ A4
+                  </button>
+                </div>
               </div>
             </div>
           </div>

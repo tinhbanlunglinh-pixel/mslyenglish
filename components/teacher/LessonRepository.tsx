@@ -11,6 +11,7 @@ import {
 } from '../../services/assignmentService';
 import { VocabularySection } from '../VocabularySection';
 import { MegaChallenge } from '../MegaChallenge';
+import { exportAssignmentToWord, exportAssignmentToPdf } from '../../utils/documentExport';
 
 interface LessonRepositoryProps {
   onEditAssignment?: (assignment: Assignment) => void;
@@ -612,6 +613,26 @@ export const LessonRepository: React.FC<LessonRepositoryProps> = ({
             <span>🔄</span> Giao Lại Hoặc Giao Cho Lớp Khác
           </button>
 
+          {/* CÁC NÚT TẢI FILE WORD & XUẤT FILE PDF */}
+          <div className="grid grid-cols-2 gap-2 pt-0.5">
+            <button
+              type="button"
+              onClick={() => exportAssignmentToWord(assign, true)}
+              className="py-1.5 px-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl font-bold text-xs border border-blue-200 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              title="Tải xuống đề bài & đáp án file Word (.doc)"
+            >
+              <span>📄</span> Tải Word
+            </button>
+            <button
+              type="button"
+              onClick={() => exportAssignmentToPdf(assign, true)}
+              className="py-1.5 px-2 bg-purple-50 hover:bg-purple-100 text-purple-700 rounded-xl font-bold text-xs border border-purple-200 transition-colors flex items-center justify-center gap-1 cursor-pointer"
+              title="Xuất file PDF hoặc in trực tiếp ra giấy A4"
+            >
+              <span>🖨️</span> Xuất PDF
+            </button>
+          </div>
+
           <div className="flex items-center gap-2">
             {/* Nút xem chi tiết / làm thử */}
             <button
@@ -1104,6 +1125,24 @@ const LessonPreviewModal: React.FC<LessonPreviewModalProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => exportAssignmentToWord(assignment, true)}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Tải xuống đề bài kèm đáp án chi tiết file Word (.doc)"
+            >
+              <span>📄</span> Tải Word
+            </button>
+
+            <button
+              type="button"
+              onClick={() => exportAssignmentToPdf(assignment, true)}
+              className="px-3 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              title="Mở trình in ấn A4 hoặc bấm Lưu dưới dạng PDF"
+            >
+              <span>🖨️</span> In / PDF
+            </button>
+
             <button
               onClick={onReassign}
               className="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs sm:text-sm font-black shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
