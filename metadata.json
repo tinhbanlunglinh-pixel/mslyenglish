@@ -1,8 +1,8 @@
 {
-  "name": "Remix: ENGLISH MRS. DUNG",
-  "description": "Ứng dụng luyện nói Tiếng Anh cùng cô giáo Mrs. Dung, tạo hình ảnh minh họa và xuất giấy chứng nhận cho trẻ em.",
+  "name": "ENGLISH MRS. DUNG VERSON 3",
+  "description": "English with Heart - Success with Mrs.Dung. Hệ thống AI hỗ trợ giảng dạy và học tập Tiếng Anh dành cho trẻ em.",
   "requestFramePermissions": [
-    "microphone"
-  ],
-  "majorCapabilities": []
+    "microphone",
+    "camera"
+  ]
 }
