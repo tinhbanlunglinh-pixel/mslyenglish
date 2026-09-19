@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { evaluateSpeech } from '../services/geminiService';
 import { EnglishLevel, EvaluationResult } from '../types';
+import { processRecordedAudio } from '../utils/audioUtils';
 
 export interface UseRecorderReturn {
   isRecording: boolean;
@@ -82,14 +83,13 @@ export function useRecorder(
 
     setIsEvaluating(true);
     try {
-      // ── Step 1: Client-side silence check ──
-      // Bắt buộc phải có tiếng nói thực sự: ít nhất 6 khung hình âm lượng (tương đương >100ms) và mức âm lượng đỉnh đạt tối thiểu 8%
-      const audioContextActive = audioContextRef.current !== null;
-      const hasVoice = !audioContextActive || (voiceFramesCountRef.current >= 6 && maxObservedLevelRef.current >= 8);
-      console.log(`[Recorder Evaluation Check] hasVoice=${hasVoice}, maxLevel=${maxObservedLevelRef.current}, voiceFrames=${voiceFramesCountRef.current}, audioContextActive=${audioContextActive}`);
+      // ── Step 1: Decode and analyze raw recorded audio ──
+      const { wavBlob, analysis } = await processRecordedAudio(audioBlob);
+      console.log(`[Recorder Evaluation Check] duration=${analysis.duration.toFixed(1)}s, maxAmp=${analysis.maxAmp.toFixed(4)}, rms=${analysis.rms.toFixed(5)}, isSilent=${analysis.isSilent}`);
 
-      if (!hasVoice) {
-        console.warn("[Recorder] Không phát hiện thấy âm thanh giọng đọc từ micro. TUYỆT ĐỐI KHÔNG CHẤM ĐIỂM!");
+      // Nếu sóng âm thực tế hoàn toàn im lặng (maxAmp < 0.02)
+      if (analysis.isSilent) {
+        console.warn("[Recorder] Không phát hiện thấy âm thanh giọng đọc từ micro (sóng âm im lặng). TUYỆT ĐỐI KHÔNG CHẤM ĐIỂM!");
         setEvaluation({
           isComplete: false,
           isSilent: true,
@@ -113,7 +113,11 @@ export function useRecorder(
         return;
       }
 
-      // ── Step 2: Convert raw recorded audio to base64 ──
+      // Cập nhật file nghe lại của học sinh bằng chuẩn WAV trong trẻo
+      const playableWavUrl = URL.createObjectURL(wavBlob);
+      setRecordedAudioUrl(playableWavUrl);
+
+      // ── Step 2: Convert standard WAV to base64 ──
       const base64Audio = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -124,18 +128,18 @@ export function useRecorder(
               reject(new Error("Audio data is empty or too small. Please try recording again."));
               return;
             }
-            console.log(`[Recorder] Raw Base64 ready: ${base64.length} chars, mimeType=${mimeType}`);
+            console.log(`[Recorder] Standard WAV Base64 ready: ${base64.length} chars, mimeType=audio/wav`);
             resolve(base64);
           } catch (err) {
             reject(err);
           }
         };
         reader.onerror = () => reject(new Error("Failed to read audio file"));
-        reader.readAsDataURL(audioBlob);
+        reader.readAsDataURL(wavBlob);
       });
 
-      // ── Step 3: Send raw base64 to Gemini for evaluation ──
-      const result = await evaluateSpeech(currentText, base64Audio, currentLevel, mimeType);
+      // ── Step 3: Send clean WAV base64 to Gemini for evaluation ──
+      const result = await evaluateSpeech(currentText, base64Audio, currentLevel, "audio/wav");
       setEvaluation(result);
       setIsEvaluating(false);
     } catch (err: any) {

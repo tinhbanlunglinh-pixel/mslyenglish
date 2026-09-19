@@ -451,10 +451,10 @@ export default function App() {
                   {isGenerating ? (
                     <motion.div key="loading" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center gap-4">
                       <div className="relative">
-                        <div className="w-20 h-20 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
-                        <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-indigo-600" size={24} />
+                        <div className="w-20 h-20 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin"></div>
+                        <Sparkles className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-emerald-600" size={24} />
                       </div>
-                      <p className="text-gray-500 font-medium animate-pulse text-center px-4">Gemini đang soạn bài đọc cho bạn...</p>
+                      <p className="text-emerald-700 font-bold animate-pulse text-center px-4">Cô Lý đang soạn bài cho em nhé</p>
                     </motion.div>
                   ) : readingText ? (
                     <motion.div key="result" initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="w-full flex flex-col items-center gap-4">
