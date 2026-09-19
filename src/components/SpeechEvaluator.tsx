@@ -15,7 +15,8 @@ import {
   Check,
   Award,
   BookOpen,
-  MessageSquareHeart
+  MessageSquareHeart,
+  FileText
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { EvaluationResult } from '../types';
@@ -320,6 +321,19 @@ const CompleteResult: React.FC<{
       {/* 3. Nghe lại bản thu âm của học sinh nếu có */}
       {recordedAudioUrl && (
         <StudentAudioPlayer audioUrl={recordedAudioUrl} />
+      )}
+
+      {/* 3b. 🎙️ NỘI DUNG CÔ LÝ NGHE ĐƯỢC (transcribedText) */}
+      {evaluation.transcribedText && evaluation.transcribedText.trim().length > 3 && (
+        <div className="p-4 bg-blue-50 border-2 border-blue-200 rounded-2xl shadow-xs space-y-2">
+          <div className="flex items-center gap-2 text-blue-800 font-black text-xs sm:text-sm uppercase tracking-wider">
+            <FileText size={18} className="text-blue-500" />
+            <span>🎙️ Cô Lý nghe con đọc:</span>
+          </div>
+          <p className="text-xs sm:text-sm text-blue-950 font-medium pl-2 leading-relaxed italic">
+            "{evaluation.transcribedText.trim()}"
+          </p>
+        </div>
       )}
 
       {/* 4. 🌟 ƯU ĐIỂM */}

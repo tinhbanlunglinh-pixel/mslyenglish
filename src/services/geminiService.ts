@@ -784,6 +784,7 @@ export interface EvaluationResult {
   isComplete: boolean;
   isSilent?: boolean;
   missingContent?: string;
+  transcribedText?: string;   // Nội dung AI nghe được từ giọng đọc của học sinh
 
   // Cấu trúc mới theo đúng mẫu nhận xét của Cô Lý
   strengthsSummary?: {
@@ -939,12 +940,17 @@ Khi học sinh CÓ đọc bài:
      * "original": Câu học sinh đọc chưa chuẩn (ví dụ: "He is play in a cake")
      * "corrected": Câu đúng chuẩn (ví dụ: "He is playing with a cake.")
 
+5. 📝 Phiên bản văn bản ("transcribedText"):
+   - Ghi lại toàn bộ nội dung bạn nghe được từ giọng học sinh đọc (dù sai hay đúng), viết dưới dạng text thuần túy.
+   - Nếu file hoàn toàn im lặng: để trống "".
+
 Output strictly JSON:
 {
   "isComplete": true,
   "isSilent": false,
   "score": number,
   "feedback": string,
+  "transcribedText": string,
   "strengthsSummary": {
     "attitude": string,
     "goodWords": string[]
@@ -1038,9 +1044,16 @@ Output strictly JSON:
     const hasAnyImprovements = Array.isArray(result.improvementsList) && result.improvementsList.length > 0;
     const hasAnyEvaluatedErrors = Array.isArray(result.detailedErrors) && result.detailedErrors.length > 0;
     const hasAnyGoodWords = Array.isArray(result.strengthsSummary?.goodWords) && result.strengthsSummary.goodWords.length > 0;
+    const transcribedText: string = result.transcribedText || "";
     
-    // Bất kỳ dấu hiệu nào cho thấy file im lặng, không có tiếng, hoặc điểm bằng 0 -> TUYỆT ĐỐI KHÔNG CHẤM ĐIỂM!
-    const isSilent = isExplicitlySilent || isExplicitlyIncomplete || mentionsSilence || (!result.score || result.score === 0);
+    // Coi là im lặng CHỈ KHI:
+    // - AI trả về isSilent: true HOẶC
+    // - AI đề cập đến im lặng trong feedback/missingContent VÀ không phiên âm được gì VÀ điểm = 0
+    // KHÔNG dùng isExplicitlyIncomplete vì AI đôi khi trả về isComplete: false nhưng vẫn có điểm thực tế
+    const hasRealScore = typeof result.score === 'number' && result.score > 0;
+    const hasTranscribedContent = transcribedText.trim().length > 3;
+    const isSilent = isExplicitlySilent || 
+      (mentionsSilence && !hasRealScore && !hasTranscribedContent && !hasAnyImprovements && !hasAnyGoodWords);
 
     if (isSilent) {
       return {
@@ -1072,7 +1085,14 @@ Output strictly JSON:
       finalScore = computeTotalFromCriteria(criteria);
     }
 
-    // Nếu điểm bằng 0 -> KHÔNG CHẤM ĐIỂM!
+    // Nếu điểm vẫn = 0 nhưng có ghi âm thực tế (transcribedText không rỗng hoặc có goodWords/improvements)
+    // -> Gán điểm tối thiểu 5.0 để không bị nhầm là im lặng
+    if (finalScore === 0 && (hasTranscribedContent || hasAnyImprovements || hasAnyGoodWords)) {
+      finalScore = 5.0;
+      console.warn("[EvalSpeech] Score was 0 but audio has content; overriding to 5.0 minimum.");
+    }
+
+    // Nếu điểm thực sự = 0 VÀ không có bất kỳ nội dung nào -> coi là im lặng
     if (finalScore === 0) {
       return {
         isComplete: false,
@@ -1142,6 +1162,7 @@ Output strictly JSON:
       cefrLevel: "",
       criteriaScores: normalizedCriteria,
       feedback: result.feedback || "Chào con, cô Lý đây! Cô khen con đã rất cố gắng hoàn thành bài đọc hôm nay.",
+      transcribedText,
       strengthsSummary,
       improvementsList,
       reviewItems,
