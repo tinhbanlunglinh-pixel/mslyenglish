@@ -1,14 +1,18 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { evaluateSpeech } from '../services/geminiService';
 import { EnglishLevel, EvaluationResult } from '../types';
 
-interface UseRecorderReturn {
+export interface UseRecorderReturn {
   isRecording: boolean;
   isEvaluating: boolean;
   evaluation: EvaluationResult | null;
+  audioLevel: number; // 0 - 100
+  hasDetectedVoice: boolean;
+  recordedAudioUrl: string | null;
   setEvaluation: (evaluation: EvaluationResult | null) => void;
   startRecording: () => Promise<void>;
   stopRecording: () => void;
+  clearRecordedAudio: () => void;
 }
 
 export function useRecorder(
@@ -19,8 +23,20 @@ export function useRecorder(
   const [isRecording, setIsRecording] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [hasDetectedVoice, setHasDetectedVoice] = useState(false);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState<string | null>(null);
+
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
+  const recordingStartTimeRef = useRef<number>(0);
+  const animFrameRef = useRef<number | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  
+  // Real-time audio tracking
+  const hasDetectedVoiceRef = useRef(false);
+  const voiceFramesCountRef = useRef(0);
+  const maxObservedLevelRef = useRef(0);
 
   // Use refs to avoid stale closures in callbacks
   const isRecordingRef = useRef(false);
@@ -30,6 +46,28 @@ export function useRecorder(
   // Keep refs in sync with props/state
   readingTextRef.current = readingText;
   levelRef.current = level;
+
+  // Cleanup recorded audio blob URL on unmount
+  useEffect(() => {
+    return () => {
+      if (recordedAudioUrl) {
+        URL.revokeObjectURL(recordedAudioUrl);
+      }
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+      }
+      if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+        audioContextRef.current.close().catch(() => {});
+      }
+    };
+  }, []);
+
+  const clearRecordedAudio = useCallback(() => {
+    if (recordedAudioUrl) {
+      URL.revokeObjectURL(recordedAudioUrl);
+      setRecordedAudioUrl(null);
+    }
+  }, [recordedAudioUrl]);
 
   const handleEvaluate = useCallback(async (audioBlob: Blob, mimeType: string) => {
     const currentText = readingTextRef.current;
@@ -44,7 +82,38 @@ export function useRecorder(
 
     setIsEvaluating(true);
     try {
-      // ── Step 1: Convert raw recorded audio to base64 ──
+      // ── Step 1: Client-side silence check ──
+      // Bắt buộc phải có tiếng nói thực sự: ít nhất 6 khung hình âm lượng (tương đương >100ms) và mức âm lượng đỉnh đạt tối thiểu 8%
+      const audioContextActive = audioContextRef.current !== null;
+      const hasVoice = !audioContextActive || (voiceFramesCountRef.current >= 6 && maxObservedLevelRef.current >= 8);
+      console.log(`[Recorder Evaluation Check] hasVoice=${hasVoice}, maxLevel=${maxObservedLevelRef.current}, voiceFrames=${voiceFramesCountRef.current}, audioContextActive=${audioContextActive}`);
+
+      if (!hasVoice) {
+        console.warn("[Recorder] Không phát hiện thấy âm thanh giọng đọc từ micro. TUYỆT ĐỐI KHÔNG CHẤM ĐIỂM!");
+        setEvaluation({
+          isComplete: false,
+          isSilent: true,
+          score: 0,
+          missingContent: "File ghi âm hoàn toàn im lặng hoặc micro chưa thu được tiếng con đọc.",
+          feedback: "Chào con, cô Lý đây! Có vẻ như micro của con chưa thu được tiếng nói (file ghi âm đang bị im lặng). Con hãy kiểm tra lại micro, đọc to rõ ràng và thử ghi âm lại một lần nữa để cô Lý lắng nghe và chấm điểm cho con nha!",
+          criteriaScores: undefined,
+          criteriaFeedback: undefined,
+          detailedErrors: [],
+          strengthsSummary: undefined,
+          improvementsList: [],
+          reviewItems: [],
+          formattedComment: "",
+          ipaAnalysis: [],
+          standardSentences: [],
+          personalizedExercises: [],
+          strengths: [],
+          improvements: []
+        });
+        setIsEvaluating(false);
+        return;
+      }
+
+      // ── Step 2: Convert raw recorded audio to base64 ──
       const base64Audio = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -65,8 +134,7 @@ export function useRecorder(
         reader.readAsDataURL(audioBlob);
       });
 
-      // ── Step 2: Send raw base64 to Gemini for evaluation ──
-      // Gemini natively accepts audio/webm, audio/mp4, audio/ogg, audio/wav, audio/mp3
+      // ── Step 3: Send raw base64 to Gemini for evaluation ──
       const result = await evaluateSpeech(currentText, base64Audio, currentLevel, mimeType);
       setEvaluation(result);
       setIsEvaluating(false);
@@ -103,15 +171,90 @@ export function useRecorder(
 
   const startRecording = useCallback(async () => {
     try {
-      // Request audio with noise reduction for better speech recognition
+      // Clear previous recording audio URL
+      if (recordedAudioUrl) {
+        URL.revokeObjectURL(recordedAudioUrl);
+        setRecordedAudioUrl(null);
+      }
+
+      // Reset voice tracking counters
+      hasDetectedVoiceRef.current = false;
+      voiceFramesCountRef.current = 0;
+      maxObservedLevelRef.current = 0;
+      setHasDetectedVoice(false);
+      setAudioLevel(0);
+
+      // Request audio stream
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: {
           echoCancellation: true,
-          noiseSuppression: true,
+          noiseSuppression: false, // Tắt lọc ồn triệt để tránh làm mất giọng đọc của trẻ nhỏ
           autoGainControl: true,
-          channelCount: { ideal: 1 },
         } 
       });
+
+      // Real-time audio analyser for volume meter & wave display
+      try {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextClass) {
+          const audioCtx = new AudioContextClass();
+          audioContextRef.current = audioCtx;
+          
+          // Resume audio context if in suspended state
+          if (audioCtx.state === 'suspended') {
+            await audioCtx.resume();
+          }
+
+          const analyser = audioCtx.createAnalyser();
+          analyser.fftSize = 512;
+          analyser.smoothingTimeConstant = 0.3;
+
+          const source = audioCtx.createMediaStreamSource(stream);
+          source.connect(analyser);
+
+          const timeDomainData = new Uint8Array(analyser.fftSize);
+
+          const updateVolume = () => {
+            if (!isRecordingRef.current) return;
+            
+            // Lấy dữ liệu sóng âm thời gian thực
+            analyser.getByteTimeDomainData(timeDomainData);
+
+            let sumSquares = 0;
+            let peakDeviation = 0;
+
+            for (let i = 0; i < timeDomainData.length; i++) {
+              const deviation = Math.abs(timeDomainData[i] - 128);
+              if (deviation > peakDeviation) peakDeviation = deviation;
+              sumSquares += deviation * deviation;
+            }
+
+            const rms = Math.sqrt(sumSquares / timeDomainData.length);
+            // Đo độ lớn âm lượng chính xác từ 0 đến 100%
+            const normalized = Math.min(100, Math.max(0, Math.round((rms / 35) * 100)));
+            setAudioLevel(normalized);
+
+            if (normalized > maxObservedLevelRef.current) {
+              maxObservedLevelRef.current = normalized;
+            }
+
+            if (normalized >= 6) {
+              voiceFramesCountRef.current += 1;
+              // Chỉ xác nhận có tiếng nói khi thu được ít nhất 6 frames âm lượng (tránh nhận nhầm tiếng click chuột)
+              if (voiceFramesCountRef.current >= 6) {
+                hasDetectedVoiceRef.current = true;
+                setHasDetectedVoice(true);
+              }
+            }
+
+            animFrameRef.current = requestAnimationFrame(updateVolume);
+          };
+
+          animFrameRef.current = requestAnimationFrame(updateVolume);
+        }
+      } catch (err) {
+        console.warn("[Recorder] AudioContext visualizer could not be started:", err);
+      }
 
       // Choose the best MIME type supported by this browser
       const preferredTypes = [
@@ -134,17 +277,59 @@ export function useRecorder(
       audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data);
         }
       };
 
       mediaRecorder.onstop = async () => {
         try {
+          if (animFrameRef.current) {
+            cancelAnimationFrame(animFrameRef.current);
+            animFrameRef.current = null;
+          }
+          if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+            audioContextRef.current.close().catch(() => {});
+            audioContextRef.current = null;
+          }
+          setAudioLevel(0);
+
+          const duration = (Date.now() - recordingStartTimeRef.current) / 1000;
+          console.log(`[Recorder] Recording duration: ${duration.toFixed(1)}s, chunks: ${audioChunksRef.current.length}`);
+
           const mimeType = mediaRecorder.mimeType || 'audio/webm';
           const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
           
-          console.log(`[Recorder] Recording stopped: ${audioBlob.size} bytes, ${mimeType}, ${audioChunksRef.current.length} chunks`);
+          console.log(`[Recorder] Recording stopped: ${audioBlob.size} bytes, ${mimeType}`);
+
+          // Create local playable URL so user can listen to their recording
+          const localAudioUrl = URL.createObjectURL(audioBlob);
+          setRecordedAudioUrl(localAudioUrl);
+
+          // Check if recording is way too short (< 1.2s)
+          if (duration < 1.2) {
+            setEvaluation({
+              isComplete: false,
+              isSilent: true,
+              score: 0,
+              missingContent: "Đoạn ghi âm quá ngắn (chưa đầy 1 giây).",
+              feedback: "Chào con, cô Lý đây! Đoạn ghi âm của con hơi ngắn nên cô chưa nghe kịp. Con hãy đọc hết bài đọc rồi hãy nhấn nút Dừng nhé!",
+              criteriaScores: undefined,
+              criteriaFeedback: undefined,
+              detailedErrors: [],
+              strengthsSummary: undefined,
+              improvementsList: [],
+              reviewItems: [],
+              formattedComment: "",
+              ipaAnalysis: [],
+              standardSentences: [],
+              personalizedExercises: [],
+              strengths: [],
+              improvements: []
+            });
+            setIsEvaluating(false);
+            return;
+          }
 
           if (audioBlob.size < 100) {
             console.error("[Recorder] Audio blob is too small:", audioBlob.size);
@@ -163,10 +348,9 @@ export function useRecorder(
         }
       };
 
-      // Start recording. Do NOT pass a timeslice (e.g. 1000) so the browser buffers
-      // and outputs a single, well-formed container file upon stop. This is far more robust
-      // across different browsers and avoids chunk index/header corruption issues.
-      mediaRecorder.start();
+      // Emit chunk every 250ms so data is flushed continuously
+      mediaRecorder.start(250);
+      recordingStartTimeRef.current = Date.now();
       isRecordingRef.current = true;
       setIsRecording(true);
       setEvaluation(null);
@@ -184,11 +368,10 @@ export function useRecorder(
         setError(`Lỗi micro: ${err.message || "Vui lòng kiểm tra lại thiết bị của bạn."}`);
       }
     }
-  }, [handleEvaluate, setError]);
+  }, [handleEvaluate, recordedAudioUrl, setError]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecordingRef.current) {
-      // Set evaluating immediately so UI transitions smoothly
       setIsEvaluating(true);
       
       setTimeout(() => {
@@ -208,7 +391,7 @@ export function useRecorder(
         }
         isRecordingRef.current = false;
         setIsRecording(false);
-      }, 500);
+      }, 200);
     }
   }, []);
 
@@ -216,8 +399,12 @@ export function useRecorder(
     isRecording,
     isEvaluating,
     evaluation,
+    audioLevel,
+    hasDetectedVoice,
+    recordedAudioUrl,
     setEvaluation,
     startRecording,
     stopRecording,
+    clearRecordedAudio,
   };
 }

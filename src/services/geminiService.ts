@@ -539,6 +539,9 @@ export function speakWithBrowser(text: string, level: EnglishLevel): void {
 
   // Stop any ongoing speech
   window.speechSynthesis.cancel();
+  if (window.speechSynthesis.paused) {
+    window.speechSynthesis.resume();
+  }
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = 'en-US';
@@ -559,13 +562,25 @@ export function speakWithBrowser(text: string, level: EnglishLevel): void {
   const voices = window.speechSynthesis.getVoices();
   const englishVoice = voices.find(v => v.lang === 'en-US' && v.name.includes('Google')) 
     || voices.find(v => v.lang === 'en-US') 
-    || voices.find(v => v.lang.startsWith('en-'));
+    || voices.find(v => v.lang.startsWith('en'));
   
   if (englishVoice) {
     utterance.voice = englishVoice;
   }
 
-  window.speechSynthesis.speak(utterance);
+  utterance.onstart = () => {
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+  };
+
+  // Small delay to let cancel() settle in Chrome/Edge before speaking
+  setTimeout(() => {
+    window.speechSynthesis.speak(utterance);
+    if (window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+    }
+  }, 50);
 }
 
 export function stopBrowserTTS(): void {
@@ -752,21 +767,45 @@ export interface CriteriaFeedback {
   connectedSpeech: string;
 }
 
+export interface ImprovementItem {
+  word: string;
+  ipa: string;
+  detail: string;
+}
+
+export interface ReviewItem {
+  original: string;
+  corrected: string;
+}
+
 export interface EvaluationResult {
   score: number;
   feedback: string;
+  isComplete: boolean;
+  isSilent?: boolean;
+  missingContent?: string;
+
+  // Cấu trúc mới theo đúng mẫu nhận xét của Cô Lý
+  strengthsSummary?: {
+    attitude: string;
+    goodWords: string[];
+  };
+  improvementsList?: ImprovementItem[];
+  criteriaScores?: {
+    pronunciation: number;
+    fluency: number;
+    intonation: number;
+    grammar: number;
+    stress?: number;
+    connectedSpeech?: number;
+  };
+  reviewItems?: ReviewItem[];
+  formattedComment?: string;
+
+  // Các trường tương thích ngược
   strengths: string[];
   improvements: string[];
   cefrLevel?: string;
-  isComplete: boolean;
-  missingContent?: string;
-  criteriaScores?: {
-    pronunciation: number;
-    stress: number;
-    intonation: number;
-    fluency: number;
-    connectedSpeech: number;
-  };
   criteriaFeedback?: CriteriaFeedback;
   detailedErrors?: DetailedError[];
   ipaAnalysis?: {
@@ -779,11 +818,69 @@ export interface EvaluationResult {
   personalizedExercises?: string[];
 }
 
-/** Compute total score as average of 5 criteria (each on 0-10 scale). Base 5 for reading completion. */
+/** Tạo đoạn văn bản nhận xét đầy đủ theo đúng mẫu chuẩn của Cô Lý gửi phụ huynh */
+export function buildFormattedComment(evaluation: EvaluationResult): string {
+  if (evaluation.formattedComment) return evaluation.formattedComment;
+
+  const lines: string[] = [];
+  lines.push("Cô Lý cảm ơn bố/mẹ ạ! ❤️ Cô đã nhận được video luyện của con rồi ạ!");
+  lines.push("Cô xin gửi lại bố/mẹ nhận xét bài của con như sau:\n");
+
+  // 🌟 Ưu điểm
+  lines.push("🌟 Ưu điểm:");
+  const attitude = evaluation.strengthsSummary?.attitude || "Con rất tự tin, giọng đọc to, rõ ràng.";
+  lines.push(`◦ Phong thái: ${attitude}`);
+  const goodWords = evaluation.strengthsSummary?.goodWords || [];
+  if (goodWords.length > 0) {
+    lines.push(`◦ Phát âm tốt: ${goodWords.join(", ")}.`);
+  }
+
+  // 📝 Điểm cần cải thiện
+  lines.push("\n📝 Điểm cần cải thiện:");
+  if (evaluation.improvementsList && evaluation.improvementsList.length > 0) {
+    evaluation.improvementsList.forEach((item) => {
+      const cleanIpa = item.ipa ? ` /${item.ipa.replace(/^\/|\/$/g, '')}/` : '';
+      lines.push(`◦ ${item.word}${cleanIpa}: ${item.detail}`);
+    });
+  } else if (evaluation.detailedErrors && evaluation.detailedErrors.length > 0) {
+    evaluation.detailedErrors.forEach((err) => {
+      lines.push(`◦ ${err.word}: ${err.errorDetail} → ${err.howToFix}`);
+    });
+  } else {
+    lines.push("◦ Con phát âm rất tốt các từ trong bài, cố gắng phát huy nhé!");
+  }
+
+  // 📊 Đánh giá
+  lines.push("\n📊 Đánh giá:");
+  const sc = evaluation.score;
+  const crit = evaluation.criteriaScores;
+  lines.push(`🏆 Tổng điểm: ${sc}/10`);
+  lines.push(`🗣️ Phát âm: ${crit?.pronunciation ?? sc}/10`);
+  lines.push(`🌊 Trôi chảy: ${crit?.fluency ?? sc}/10`);
+  lines.push(`🎵 Ngữ điệu: ${crit?.intonation ?? sc}/10`);
+  lines.push(`📖 Ngữ pháp: ${crit?.grammar ?? sc}/10`);
+
+  // 📚 Con cần ôn thêm
+  if (evaluation.reviewItems && evaluation.reviewItems.length > 0) {
+    lines.push("\n📚 Con cần ôn thêm:");
+    evaluation.reviewItems.forEach((item) => {
+      lines.push(`◦ ${item.original} → sửa đúng thành ${item.corrected}.`);
+    });
+  }
+
+  lines.push("\nCô mong con tiếp tục cố gắng và duy trì tinh thần học tập thật tốt nhé! ❤️");
+  lines.push("Cô xin cảm ơn bố mẹ đã luôn đồng hành cùng cô và con ạ!");
+
+  return lines.join("\n");
+}
+
+/** Compute total score as average of criteria (each on 0-10 scale). */
 export function computeTotalFromCriteria(criteria: EvaluationResult['criteriaScores']): number {
   if (!criteria) return 0;
-  const { pronunciation, stress, intonation, fluency, connectedSpeech } = criteria;
-  const avg = (pronunciation + stress + intonation + fluency + connectedSpeech) / 5;
+  const { pronunciation, fluency, intonation, grammar } = criteria;
+  const items = [pronunciation, fluency, intonation, grammar].filter(v => typeof v === 'number');
+  if (items.length === 0) return 0;
+  const avg = items.reduce((a, b) => a + b, 0) / items.length;
   return Math.round(avg * 10) / 10;
 }
 
@@ -793,55 +890,77 @@ export const evaluateSpeech = async (
   level: EnglishLevel,
   mimeType: string = "audio/webm"
 ): Promise<EvaluationResult> => {
-  const systemInstruction = `Bạn là Ms Lý — giáo viên tiếng Anh nhiệt huyết, chuyên rèn phát âm theo chuẩn CEFR & Cambridge (Starters, Movers, Flyers, KET, PET).
+  const systemInstruction = `Bạn là Ms Lý — giáo viên tiếng Anh nhiệt huyết, chuyên rèn phát âm & ngữ pháp cho học sinh tiểu học và thiếu nhi theo chuẩn CEFR & Cambridge (Starters, Movers, Flyers).
 Bạn nghe audio thu âm giọng học sinh đọc bài đọc gốc (Original Text).
 
-🎯 NGUYÊN TẮC QUAN TRỌNG NHẤT VỀ CHẤM ĐIỂM & NHẬN XÉT:
-1. KHÔNG QUÁ NGHIÊM NGẶT VỀ NỘI DUNG — CHỈ CẦN ĐÚNG NỘI DUNG LÀ CHẤM ĐIỂM:
-   - Chỉ cần học sinh đọc theo nội dung bài đọc gốc (dù đọc vấp, đọc chậm, phát âm sai một số từ, hoặc lỡ đọc lướt qua 1-2 từ) thì VẪN LUÔN LUÔN CHẤM ĐIỂM NGAY ("isComplete": true).
-   - Tuyệt đối KHÔNG bắt học sinh đọc lại hoặc đánh trượt ("isComplete": false) trừ khi file thu âm hoàn toàn im lặng, không có tiếng nói hoặc nói chuyện hoàn toàn không liên quan đến bài đọc.
-   - Điểm tổng: Đánh giá tổng quan, hào phóng và khích lệ (thường từ 7.0 đến 9.5 điểm) để động viên tinh thần của trẻ.
+🚨 QUY TẮC BẮT BUỘC KHI FILE GHI ÂM BỊ IM LẶNG / KHÔNG CÓ TIẾNG / LỖI ÂM THANH:
+- Nếu file âm thanh hoàn toàn im lặng, không có tiếng người nói, chỉ có tiếng ồn nền, hoặc không nghe rõ được bất kỳ từ nào của bài đọc:
+  * BẮT BUỘC TRẢ VỀ JSON:
+    {
+      "isComplete": false,
+      "isSilent": true,
+      "missingContent": "File ghi âm bị im lặng hoặc micro không thu được tiếng con đọc.",
+      "score": 0,
+      "feedback": "Chào con, cô Lý đây! Có vẻ như file ghi âm của con đang bị im lặng hoặc micro chưa thu được tiếng. Con hãy kiểm tra lại micro trên máy tính/điện thoại, nói to rõ ràng và thử ghi âm lại một lần nữa để cô Lý lắng nghe và chấm điểm cho con nha! Cô Lý tin con sẽ làm rất tốt!",
+      "strengthsSummary": null,
+      "improvementsList": [],
+      "criteriaScores": null,
+      "reviewItems": []
+    }
+  * TUYỆT ĐỐI KHÔNG CHẤM ĐIỂM (score = 0) khi file âm thanh bị im lặng!
 
-2. SAI Ở ĐÂU THÌ ĐƯA VÀO PHẦN NHẬN XÉT CHI TIẾT ĐỂ HỌC SINH SỬA LỖI:
-   - Mọi lỗi phát âm sai, nuốt âm đuôi, nhầm âm, quên âm gió, đọc ngập ngừng hay từ đọc sót ĐỀU ĐƯỢC ĐƯA VÀO "detailedErrors" và "criteriaFeedback" để hướng dẫn học sinh sửa lỗi.
-   - "detailedErrors" phải chỉ CỰC KỲ RÕ RÀNG:
-     * "word": Từ gốc trong bài đọc mà học sinh đọc sai hoặc bỏ sót (ví dụ: "fast", "garden", "friends", "walked").
-     * "errorDetail": Nêu rõ SAI Ở ĐÂU (ví dụ: "Con quên bật âm đuôi /t/ ở cuối từ", "Con đọc nhầm âm /ɜː/ thành /u/", "Con quên phát âm âm đuôi số nhiều /z/", "Con đọc lướt qua chưa phát âm từ này").
-     * "howToFix": Nêu rõ CẦN SỬA GÌ (hướng dẫn cụ thể, phiên âm IPA chuẩn, cách đặt khẩu hình miệng hoặc mẹo nhớ dễ hiểu từ cô Lý. Ví dụ: "Phiên âm chuẩn là /fɑːst/. Con hãy cắn nhẹ hai hàm răng và bật âm 't' gió thật dứt khoát nhé!").
+🎯 NGUYÊN TẮC CHẤM ĐIỂM & NHẬN XÉT THEO ĐÚNG MẪU BÁO CÁO CỦA CÔ LÝ:
+Khi học sinh CÓ đọc bài:
+1. 🌟 Ưu điểm ("strengthsSummary"):
+   - "attitude": Lời khen về phong thái (ví dụ: "Con rất tự tin, giọng đọc to, rõ ràng.")
+   - "goodWords": Danh sách 3-5 từ con phát âm chuẩn, tròn vành rõ chữ nhất trong bài đọc (ví dụ: ["Hello", "name", "happy", "football"])
 
-3. NHẬN XÉT CHUNG & NHẬN XÉT ĐỊNH TÍNH THEO 5 MỤC CHUẨN CAMBRIDGE:
-   - feedback: ĐÚNG 1 CÂU nhận xét chung ngắn gọn, ấm áp, khích lệ nỗ lực của con (ví dụ: "Chào con, cô Lý khen con đã hoàn thành bài đọc rất tự tin với giọng đọc to, rõ ràng!").
-   - criteriaFeedback: Nhận xét riêng từng mục định tính chuẩn Cambridge (tuyệt đối KHÔNG chấm điểm con, mỗi mục có lời nhận xét riêng biệt):
-     * pronunciation (Phát âm): Lời nhận xét riêng về nguyên âm, phụ âm, phát âm tròn vành rõ chữ.
-     * stress (Trọng âm): Lời nhận xét riêng về cách nhấn trọng âm ở các từ 2-3 âm tiết và trọng âm câu.
-     * intonation (Ngữ điệu): Lời nhận xét riêng về ngữ điệu lên/xuống giọng tự nhiên.
-     * fluency (Độ trôi chảy): Lời nhận xét riêng về tốc độ đọc, độ liền mạch và cách ngắt nghỉ câu.
-     * connectedSpeech (Nối âm & Âm đuôi): Lời nhận xét riêng về việc bật âm đuôi (ending sounds /s/, /t/, /d/, /k/...) và nối âm.
+2. 📝 Điểm cần cải thiện ("improvementsList"):
+   - Danh sách các từ con đọc sai, nuốt âm cuối, nhầm âm hoặc nhấn trọng âm chưa đúng:
+     * "word": Từ gốc trong bài đọc (ví dụ: "cake", "picture", "seven")
+     * "ipa": Phiên âm IPA chuẩn của từ (ví dụ: "/ˈkeɪk/", "/ˈpɪk.tʃər/", "/ˈsev.ən/")
+     * "detail": Nhận xét chi tiết và cách sửa dễ hiểu cho con (ví dụ: "con đọc gần đúng, chú ý âm cuối /k/ bật hơi rõ.", "con đọc gần đúng, chú ý âm /tʃ/", "đọc sai thành /se-vần/ → đọc đúng 'SE-vần' (nhấn âm đầu).")
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-🎀 PHONG CÁCH PHẢN HỒI (Ms Lý)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-- Ấm áp, yêu thương, luôn bắt đầu bằng: "Chào con, cô Lý đây!"
-- Khen ngợi điểm nỗ lực trước, sau đó chỉ rõ lỗi sai ở đâu và hướng dẫn sửa từng chút một.
+3. 📊 Đánh giá ("criteriaScores"):
+   - Chấm điểm công tâm, khích lệ trên thang 10 (từ 5.0 đến 9.5):
+     * "score": Tổng điểm luyện nói (ví dụ: 6.5, 7.0, 7.5, 8.0, 8.5)
+     * "pronunciation": Điểm Phát âm (0 - 10, ví dụ 6.0, 7.5)
+     * "fluency": Điểm Trôi chảy (0 - 10, ví dụ 6.5, 8.0)
+     * "intonation": Điểm Ngữ điệu (0 - 10, ví dụ 7.0, 8.5)
+     * "grammar": Điểm Ngữ pháp & Độ chính xác so với bài đọc (0 - 10, ví dụ 6.0, 8.0)
+
+4. 📚 Con cần ôn thêm ("reviewItems"):
+   - Danh sách các câu hoặc cụm từ học sinh đọc nhầm, thiếu từ hoặc sai cấu trúc so với bài đọc:
+     * "original": Câu học sinh đọc chưa chuẩn (ví dụ: "He is play in a cake")
+     * "corrected": Câu đúng chuẩn (ví dụ: "He is playing with a cake.")
 
 Output strictly JSON:
 {
   "isComplete": true,
-  "missingContent": string (để rỗng "" nếu học sinh có đọc bài),
-  "score": number (điểm tổng 0-10, ví dụ 7.5, 8.2, 9.0),
-  "feedback": string (đúng 1 câu nhận xét chung ngắn gọn, ấm áp từ cô Lý),
-  "criteriaFeedback": {
-    "pronunciation": string (nhận xét riêng về Phát âm),
-    "stress": string (nhận xét riêng về Trọng âm),
-    "intonation": string (nhận xét riêng về Ngữ điệu),
-    "fluency": string (nhận xét riêng về Độ trôi chảy),
-    "connectedSpeech": string (nhận xét riêng về Nối âm & Âm đuôi)
+  "isSilent": false,
+  "score": number,
+  "feedback": string,
+  "strengthsSummary": {
+    "attitude": string,
+    "goodWords": string[]
   },
-  "detailedErrors": [
+  "improvementsList": [
     {
       "word": string,
-      "errorDetail": string (sai ở đâu),
-      "howToFix": string (cần sửa gì)
+      "ipa": string,
+      "detail": string
+    }
+  ],
+  "criteriaScores": {
+    "pronunciation": number,
+    "fluency": number,
+    "intonation": number,
+    "grammar": number
+  },
+  "reviewItems": [
+    {
+      "original": string,
+      "corrected": string
     }
   ]
 }`;
@@ -855,7 +974,7 @@ Output strictly JSON:
       {
         role: "user",
         parts: [
-          { text: `Original Text (bài đọc gốc):\n"""\n${originalText}\n"""\n\nTarget Level: ${level}\n\nNHIỆM VỤ CỦA CÔ LÝ:\n- Hãy nghe audio thu âm học sinh đọc bài đọc gốc ở trên.\n- NGUYÊN TẮC: Không quá nghiêm ngặt về nội dung. Chỉ cần học sinh có đọc bài đúng nội dung là CHẤM ĐIỂM NGAY (thang điểm 10, khích lệ từ 7.0 đến 9.5).\n- SAI Ở ĐÂU THÌ ĐƯA HẾT VÀO NHẬN XÉT: Bất kỳ từ nào phát âm sai, nuốt âm đuôi, nhầm âm hay đọc sót hãy đưa vào "detailedErrors" (nêu rõ SAI Ở ĐÂU và CẦN SỬA GÌ) để học sinh sửa lỗi.\n- Nhận xét chi tiết theo 5 tiêu chí vào "criteriaFeedback".` },
+          { text: `Original Text (bài đọc gốc):\n"""\n${originalText}\n"""\n\nTarget Level: ${level}\n\nNHIỆM VỤ CỦA CÔ LÝ:\n- Lắng nghe audio thu âm của học sinh đọc bài đọc gốc ở trên.\n- Nhận xét ĐÚNG THEO MẪU BÁO CÁO CỦA CÔ LÝ:\n  1. Ưu điểm: Phong thái và từ phát âm tốt.\n  2. Điểm cần cải thiện: Các từ đọc sai kèm IPA và hướng dẫn sửa.\n  3. Đánh giá: Điểm tổng, Phát âm, Trôi chảy, Ngữ điệu, Ngữ pháp.\n  4. Con cần ôn thêm: Các câu đọc chưa đúng → câu sửa chuẩn.\n- NẾU FILE IM LẶNG: Trả về isComplete: false, isSilent: true, score: 0.` },
           {
             inlineData: {
               mimeType: cleanMimeType,
@@ -875,42 +994,165 @@ Output strictly JSON:
   try {
     const result = parseSafeJson(response.text || "{}");
     
-    // Compute total score as average of criteria if score not directly provided
+    // Kiểm tra toàn diện các dấu hiệu file im lặng hoặc lỗi micro
+    const feedbackLower = (result.feedback || "").toLowerCase();
+    const missingLower = (result.missingContent || "").toLowerCase();
+    const isExplicitlyIncomplete = result.isComplete === false;
+    const isExplicitlySilent = result.isSilent === true;
+    const mentionsSilence = 
+      feedbackLower.includes("im lặng") || 
+      feedbackLower.includes("không nghe thấy") || 
+      feedbackLower.includes("chưa nghe được") ||
+      feedbackLower.includes("không nghe được") ||
+      feedbackLower.includes("không nghe rõ") ||
+      feedbackLower.includes("chưa nghe rõ") ||
+      feedbackLower.includes("không có tiếng") ||
+      feedbackLower.includes("chưa có tiếng") ||
+      feedbackLower.includes("không có âm thanh") ||
+      feedbackLower.includes("không thu được") ||
+      feedbackLower.includes("chưa nhận diện") ||
+      feedbackLower.includes("không nhận diện") ||
+      feedbackLower.includes("chưa thể nhận xét") ||
+      feedbackLower.includes("không thể nhận xét") ||
+      feedbackLower.includes("không phát hiện") ||
+      feedbackLower.includes("chưa phát hiện") ||
+      feedbackLower.includes("no audio") ||
+      feedbackLower.includes("silent") ||
+      feedbackLower.includes("cannot hear") ||
+      feedbackLower.includes("no voice") ||
+      missingLower.includes("im lặng") ||
+      missingLower.includes("không phát hiện") ||
+      missingLower.includes("chưa phát hiện") ||
+      missingLower.includes("không nghe") ||
+      missingLower.includes("chưa nghe") ||
+      missingLower.includes("không có tiếng") ||
+      missingLower.includes("không có âm thanh") ||
+      missingLower.includes("chưa nhận diện") ||
+      missingLower.includes("không nhận diện");
+
+    const hasAnyImprovements = Array.isArray(result.improvementsList) && result.improvementsList.length > 0;
+    const hasAnyEvaluatedErrors = Array.isArray(result.detailedErrors) && result.detailedErrors.length > 0;
+    const hasAnyGoodWords = Array.isArray(result.strengthsSummary?.goodWords) && result.strengthsSummary.goodWords.length > 0;
+    
+    // Bất kỳ dấu hiệu nào cho thấy file im lặng, không có tiếng, hoặc điểm bằng 0 -> TUYỆT ĐỐI KHÔNG CHẤM ĐIỂM!
+    const isSilent = isExplicitlySilent || isExplicitlyIncomplete || mentionsSilence || (!result.score || result.score === 0);
+
+    if (isSilent) {
+      return {
+        isComplete: false,
+        isSilent: true,
+        missingContent: result.missingContent || "File ghi âm bị im lặng hoặc micro chưa thu được tiếng con đọc.",
+        score: 0,
+        cefrLevel: "",
+        criteriaScores: undefined,
+        feedback: result.feedback || "Chào con, cô Lý đây! Có vẻ như file ghi âm của con đang bị im lặng hoặc micro chưa thu được tiếng. Con hãy kiểm tra lại micro, đọc to rõ ràng và thử ghi âm lại để cô Lý lắng nghe và chấm điểm cho con nha!",
+        criteriaFeedback: undefined,
+        detailedErrors: [],
+        strengthsSummary: undefined,
+        improvementsList: [],
+        reviewItems: [],
+        formattedComment: "",
+        ipaAnalysis: [],
+        standardSentences: [],
+        personalizedExercises: [],
+        strengths: [],
+        improvements: []
+      };
+    }
+
+    // Học sinh thực sự có đọc bài -> Tính điểm bình thường
     let finalScore = typeof result.score === 'number' ? result.score : 0;
     const criteria = result.criteriaScores;
     if (finalScore === 0 && criteria) {
       finalScore = computeTotalFromCriteria(criteria);
     }
-    // Đảm bảo luôn có điểm khích lệ nếu học sinh có đọc bài
-    if (finalScore === 0 && (result.feedback || (result.detailedErrors && result.detailedErrors.length > 0))) {
-      finalScore = 7.5;
+
+    // Nếu điểm bằng 0 -> KHÔNG CHẤM ĐIỂM!
+    if (finalScore === 0) {
+      return {
+        isComplete: false,
+        isSilent: true,
+        missingContent: "Không nhận diện được nội dung bài đọc trong audio.",
+        score: 0,
+        cefrLevel: "",
+        criteriaScores: undefined,
+        feedback: "Chào con, cô Lý đây! Cô chưa nghe rõ nội dung con đọc. Con hãy kiểm tra micro, nói to rõ ràng và bấm nút thử lại nhé!",
+        criteriaFeedback: undefined,
+        detailedErrors: [],
+        strengthsSummary: undefined,
+        improvementsList: [],
+        reviewItems: [],
+        formattedComment: "",
+        ipaAnalysis: [],
+        standardSentences: [],
+        personalizedExercises: [],
+        strengths: [],
+        improvements: []
+      };
     }
     finalScore = Math.round(finalScore * 10) / 10;
 
-    // Không quá nghiêm ngặt: chỉ khi hoàn toàn không có âm thanh / điểm 0 thì mới coi là incomplete
-    const isComplete = result.isComplete !== false || finalScore > 0;
+    // Chuẩn hóa criteriaScores
+    const normalizedCriteria = criteria ? {
+      pronunciation: typeof criteria.pronunciation === 'number' ? criteria.pronunciation : finalScore,
+      fluency: typeof criteria.fluency === 'number' ? criteria.fluency : finalScore,
+      intonation: typeof criteria.intonation === 'number' ? criteria.intonation : finalScore,
+      grammar: typeof criteria.grammar === 'number' ? criteria.grammar : finalScore,
+      stress: typeof criteria.stress === 'number' ? criteria.stress : finalScore,
+      connectedSpeech: typeof criteria.connectedSpeech === 'number' ? criteria.connectedSpeech : finalScore,
+    } : {
+      pronunciation: finalScore,
+      fluency: finalScore,
+      intonation: finalScore,
+      grammar: finalScore,
+    };
 
-    return {
-      isComplete,
+    // Chuẩn hóa improvementsList & backward-compatible detailedErrors
+    const improvementsList: ImprovementItem[] = Array.isArray(result.improvementsList) 
+      ? result.improvementsList 
+      : (Array.isArray(result.detailedErrors) 
+        ? result.detailedErrors.map((e: any) => ({ word: e.word, ipa: '', detail: `${e.errorDetail} → ${e.howToFix}` }))
+        : []);
+
+    const detailedErrors: DetailedError[] = improvementsList.map(item => ({
+      word: item.word,
+      errorDetail: item.detail,
+      howToFix: item.ipa ? `Phiên âm: /${item.ipa.replace(/^\/|\/$/g, '')}/` : item.detail
+    }));
+
+    // Chuẩn hóa reviewItems
+    const reviewItems: ReviewItem[] = Array.isArray(result.reviewItems) ? result.reviewItems : [];
+
+    // Chuẩn hóa strengthsSummary
+    const strengthsSummary = result.strengthsSummary || {
+      attitude: "Con rất tự tin, giọng đọc to, rõ ràng.",
+      goodWords: []
+    };
+
+    const evaluationObj: EvaluationResult = {
+      isComplete: true,
+      isSilent: false,
       missingContent: result.missingContent || "",
       score: finalScore,
       cefrLevel: "",
-      criteriaScores: criteria,
-      feedback: result.feedback || "Chào con, cô Lý đây! Con đã rất cố gắng hoàn thành bài đọc hôm nay.",
-      criteriaFeedback: result.criteriaFeedback || {
-        pronunciation: "Con phát âm các từ tương đối rõ ràng, chú ý bật rõ hơn các âm cuối (ending sounds).",
-        stress: "Con đã bắt đầu biết nhấn trọng âm ở các từ quan trọng.",
-        intonation: "Ngữ điệu đọc tự nhiên và có cảm xúc.",
-        fluency: "Tốc độ đọc vừa phải, chú ý ngắt nghỉ đúng theo dấu câu.",
-        connectedSpeech: "Con hãy chú ý bật âm gió /s/ và âm đuôi /t/, /d/ để câu nói chuẩn hơn nhé!"
-      },
-      detailedErrors: Array.isArray(result.detailedErrors) ? result.detailedErrors : [],
+      criteriaScores: normalizedCriteria,
+      feedback: result.feedback || "Chào con, cô Lý đây! Cô khen con đã rất cố gắng hoàn thành bài đọc hôm nay.",
+      strengthsSummary,
+      improvementsList,
+      reviewItems,
+      criteriaFeedback: result.criteriaFeedback,
+      detailedErrors,
       ipaAnalysis: [],
       standardSentences: [],
       personalizedExercises: [],
-      strengths: [],
-      improvements: []
+      strengths: strengthsSummary.goodWords || [],
+      improvements: improvementsList.map(i => `${i.word}: ${i.detail}`)
     };
+
+    // Tạo mẫu nhận xét hoàn chỉnh chuẩn theo yêu cầu của Cô Lý
+    evaluationObj.formattedComment = buildFormattedComment(evaluationObj);
+
+    return evaluationObj;
   } catch (err: any) {
     console.error("Speech Evaluation Error:", err);
     const msg = err?.message || String(err);

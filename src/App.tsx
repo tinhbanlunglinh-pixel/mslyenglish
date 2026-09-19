@@ -482,6 +482,9 @@ export default function App() {
                         isRecording={recorder.isRecording}
                         isEvaluating={recorder.isEvaluating}
                         evaluation={recorder.evaluation}
+                        audioLevel={recorder.audioLevel}
+                        hasDetectedVoice={recorder.hasDetectedVoice}
+                        recordedAudioUrl={recorder.recordedAudioUrl}
                         startRecording={recorder.startRecording}
                         stopRecording={recorder.stopRecording}
                       />
@@ -552,8 +555,9 @@ export default function App() {
                           
                           <button 
                             onClick={async () => {
-                              if (!recorder.evaluation?.isComplete || exerciseScore === null) {
-                                alert("Vui lòng hoàn thành phần luyện nói và bài tập trước khi nộp bài!");
+                              const hasValidSpeaking = recorder.evaluation?.isComplete && !recorder.evaluation?.isSilent && (recorder.evaluation?.score ?? 0) > 0;
+                              if (!hasValidSpeaking || exerciseScore === null) {
+                                alert("Chưa nhận diện được âm thanh hoặc chưa có điểm luyện nói hợp lệ. Vui lòng đọc bài to rõ ràng để được chấm điểm trước khi nộp bài!");
                                 return;
                               }
                               if (!studentName.trim() || !studentClass.trim()) {
@@ -566,7 +570,7 @@ export default function App() {
                                 tenHocSinh: studentName,
                                 lop: studentClass,
                                 tenBaiHoc: lessonName,
-                                diemSpeaking: recorder.evaluation.score,
+                                diemSpeaking: recorder.evaluation!.score,
                                 diemBaiTap: exerciseScore
                               };
                               try {
@@ -589,13 +593,13 @@ export default function App() {
                                 setIsSubmitting(false);
                               }
                             }}
-                            disabled={isSubmitting || exerciseScore === null || !studentName || !studentClass || !recorder.evaluation?.isComplete}
+                            disabled={isSubmitting || exerciseScore === null || !studentName.trim() || !studentClass.trim() || !recorder.evaluation?.isComplete || recorder.evaluation?.isSilent || (recorder.evaluation?.score ?? 0) <= 0}
                             className={`w-full py-3.5 rounded-2xl font-black text-sm sm:text-base flex items-center justify-center gap-2 transition-all shadow-lg 
-                              ${(exerciseScore !== null && studentName && studentClass && recorder.evaluation?.isComplete)
+                              ${(exerciseScore !== null && studentName.trim() && studentClass.trim() && recorder.evaluation?.isComplete && !recorder.evaluation?.isSilent && (recorder.evaluation?.score ?? 0) > 0)
                                 ? 'bg-gradient-to-r from-indigo-500 to-brand-green text-white hover:from-indigo-600 hover:to-emerald-700 hover:-translate-y-1' 
                                 : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
                           >
-                            {isSubmitting ? <RefreshCw size={24} className="animate-spin" /> : <Trophy size={24} className={exerciseScore !== null && studentName && studentClass && recorder.evaluation?.isComplete ? "animate-bounce" : ""} />}
+                            {isSubmitting ? <RefreshCw size={24} className="animate-spin" /> : <Trophy size={24} className={exerciseScore !== null && studentName.trim() && studentClass.trim() && recorder.evaluation?.isComplete && !recorder.evaluation?.isSilent && (recorder.evaluation?.score ?? 0) > 0 ? "animate-bounce" : ""} />}
                             {isSubmitting ? 'ĐANG XỬ LÝ...' : 'NỘP BÀI VÀ NHẬN GIẤY CHỨNG NHẬN'}
                           </button>
                         </div>
