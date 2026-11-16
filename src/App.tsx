@@ -33,7 +33,19 @@ import { useAudioPlayer } from './hooks/useAudioPlayer';
 import { useRecorder } from './hooks/useRecorder';
 import { useLessonHistory, LessonRecord } from './hooks/useLessonHistory';
 
-export default function App() {
+// Lớp học (kết nối GV – HS)
+import { ClassroomBar } from './components/classroom/ClassroomBar';
+import { Session, saveLessonResult, TEACHER_DISPLAY_NAME } from './services/classroom';
+
+interface AppProps {
+  session?: Session | null;
+  onLogout?: () => void;
+  onBackToTeacher?: () => void;
+  onJoinClass?: () => void;
+}
+
+export default function App({ session = null, onLogout, onBackToTeacher, onJoinClass }: AppProps = {}) {
+  const student = session?.role === 'student' ? session : null;
   // Core state
   const [topic, setTopic] = useState('');
   const [level, setLevel] = useState<EnglishLevel>("Starters");
@@ -58,9 +70,9 @@ export default function App() {
 
   // UI state
   const [isDownloading, setIsDownloading] = useState(false);
-  const [studentName, setStudentName] = useState('');
-  const [studentClass, setStudentClass] = useState('');
-  const [teacherName, setTeacherName] = useState('Ms Lý');
+  const [studentName, setStudentName] = useState(() => student?.name || '');
+  const [studentClass, setStudentClass] = useState(() => student?.className || '');
+  const [teacherName, setTeacherName] = useState(TEACHER_DISPLAY_NAME);
   const [showCertificate, setShowCertificate] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [currentLessonId, setCurrentLessonId] = useState<string | null>(null);
@@ -82,8 +94,21 @@ export default function App() {
   React.useEffect(() => {
     if (recorder.evaluation && recorder.evaluation.isComplete && currentLessonId && recorder.evaluation.score > 0) {
       lessonHistory.updateScore(currentLessonId, recorder.evaluation.score);
+      if (student && !recorder.evaluation.isSilent) {
+        saveLessonResult(student, currentLessonId, {
+          topic: generatedTopicName || topic, level, speakingScore: recorder.evaluation.score,
+        });
+      }
     }
   }, [recorder.evaluation]);
+
+  // Học sinh bấm chủ đề cô giao → điền sẵn chủ đề + trình độ
+  const handlePickAssignedTopic = useCallback((t: string, lv: string) => {
+    setContentMode("generate");
+    setTopic(t);
+    setLevel(lv as EnglishLevel);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
 
   const handleUpdateApiKey = useCallback((newKey: string, newProvider: AiProvider, newModel: string) => {
     setApiKey(newKey);
@@ -152,6 +177,9 @@ export default function App() {
         exerciseData: exData,
       });
       setCurrentLessonId(lessonId);
+      if (student) {
+        saveLessonResult(student, lessonId, { topic: topicName, level, createdAt: Date.now() });
+      }
 
     } catch (err: any) {
       console.error(err);
@@ -188,7 +216,7 @@ export default function App() {
     } finally {
       setIsGenerating(false);
     }
-  }, [topic, imagePreview, contentMode, level, audioPlayer, recorder, lessonHistory]);
+  }, [topic, imagePreview, contentMode, level, audioPlayer, recorder, lessonHistory, student]);
 
   const handleRetry = useCallback(() => {
     setError(null);
@@ -215,8 +243,11 @@ export default function App() {
     setExerciseScore(score);
     if (currentLessonId) {
       lessonHistory.updateExerciseScore(currentLessonId, score);
+      if (student) {
+        saveLessonResult(student, currentLessonId, { topic: generatedTopicName || topic, level, exerciseScore: score });
+      }
     }
-  }, [currentLessonId, lessonHistory]);
+  }, [currentLessonId, lessonHistory, student, generatedTopicName, topic, level]);
 
   const downloadPoster = useCallback(async () => {
     if (!posterRef.current || isDownloading) return;
@@ -329,7 +360,16 @@ export default function App() {
         apiKey={apiKey} 
         provider={provider}
         selectedModel={selectedModel}
-        onOpenApiKeyModal={() => setShowApiKeyModal(true)} 
+        onOpenApiKeyModal={() => setShowApiKeyModal(true)}
+      />
+
+      {/* Lớp học: tên HS, chủ đề cô giao, thoát lớp */}
+      <ClassroomBar
+        session={session}
+        onPickTopic={handlePickAssignedTopic}
+        onLogout={() => onLogout?.()}
+        onBackToTeacher={onBackToTeacher}
+        onJoinClass={onJoinClass}
       />
 
       {/* API Key Modal */}
@@ -573,6 +613,15 @@ export default function App() {
                                 diemSpeaking: recorder.evaluation!.score,
                                 diemBaiTap: exerciseScore
                               };
+                              if (student && currentLessonId) {
+                                const ok = await saveLessonResult(student, currentLessonId, {
+                                  topic: lessonName, level,
+                                  speakingScore: recorder.evaluation!.score,
+                                  exerciseScore: exerciseScore,
+                                  submitted: true, submittedAt: Date.now(),
+                                });
+                                if (!ok) alert('Chưa gửi được bài cho cô giáo (mất mạng?). Con kiểm tra mạng rồi bấm nộp lại nhé.');
+                              }
                               try {
                                 const response = await fetch("https://script.google.com/macros/s/AKfycbw0IPl4Jz98HY4uhwUPsmQ7tQa9PMQqEq6mc6Dzt0XbwryYOxWb7ULIihALAcZhrBRn/exec", {
                                   method: "POST",

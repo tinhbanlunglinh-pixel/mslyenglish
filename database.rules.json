@@ -1,0 +1,54 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "teachers": {
+      "$tid": {
+        ".read": true,
+        "passHash": { ".write": true, ".validate": "newData.isString() && newData.val().length === 64" },
+        "classes": {
+          "$code": {
+            ".write": true,
+            ".validate": "!newData.exists() || newData.hasChildren(['name'])"
+          }
+        }
+      }
+    },
+    "classes": {
+      "$code": {
+        ".read": true,
+        ".write": "!newData.exists() || data.exists() || newData.child('info').exists()",
+        ".validate": "$code.matches(/^[A-Z0-9]{6}$/)",
+        "info": {
+          ".validate": "newData.hasChildren(['name', 'teacher']) && newData.child('name').isString() && newData.child('name').val().length <= 80"
+        },
+        "students": {
+          "$sid": {
+            ".validate": "$sid.matches(/^[a-z0-9-]{1,60}$/) && newData.hasChildren(['name']) && newData.child('name').isString() && newData.child('name').val().length <= 80"
+          }
+        },
+        "results": {
+          "$sid": {
+            ".validate": "root.child('classes/' + $code + '/students/' + $sid).exists() || newData.parent().parent().child('students/' + $sid).exists()",
+            "$lessonId": {
+              "speakingScore": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
+              "exerciseScore": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
+              "topic": { ".validate": "newData.isString() && newData.val().length <= 200" },
+              "level": { ".validate": "newData.isString() && newData.val().length <= 20" },
+              "submitted": { ".validate": "newData.isBoolean()" },
+              "createdAt": { ".validate": "newData.isNumber()" },
+              "submittedAt": { ".validate": "newData.isNumber()" },
+              "$other": { ".validate": false }
+            }
+          }
+        },
+        "assignments": {
+          "$aid": {
+            ".validate": "newData.hasChildren(['topic', 'level']) && newData.child('topic').val().length <= 200"
+          }
+        },
+        "$other": { ".validate": false }
+      }
+    }
+  }
+}
