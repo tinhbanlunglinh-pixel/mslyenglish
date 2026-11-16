@@ -54,6 +54,9 @@ export const ClassroomBar: React.FC<Props> = ({ session, onPickTopic, onLogout, 
   return (
     <div className={wrap}>
       <div className={inner}>
+        <button onClick={onBackToTeacher} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-brand-green text-white font-black text-xs">
+          <ArrowLeft size={14} /> Bài cô giao
+        </button>
         <span className="flex items-center gap-2 font-black text-brand-green-dark min-w-0">
           🎒 <span className="truncate">{session.name}</span>
           <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-[11px] whitespace-nowrap">{session.className}</span>

@@ -52,13 +52,49 @@ export interface LessonResult {
   submitted?: boolean;
   submittedAt?: number;
 }
-export interface Assignment { topic: string; level: string; note?: string; createdAt: number }
+export interface VocabItem { word: string; ipa?: string; meaning?: string; emoji?: string }
+
+/** Bài cô giao. Có readingText = bài nói do cô tạo sẵn (HS không cần API key). */
+export interface Assignment {
+  topic: string;
+  level: string;
+  note?: string;
+  createdAt: number;
+  readingText?: string;
+  translation?: string;
+  vocabulary?: VocabItem[];
+}
+
+/** Kết quả chấm (rút gọn từ EvaluationResult) */
+export interface GradeResult {
+  score: number;
+  criteriaScores?: { pronunciation: number; fluency: number; intonation: number; grammar: number };
+  strengthsSummary?: { attitude: string; goodWords: string[] };
+  improvementsList?: { word: string; ipa?: string; detail: string }[];
+  reviewItems?: { original: string; corrected: string }[];
+  transcribedText?: string;
+  isSilent?: boolean;
+  feedback?: string;
+}
+
+export interface Submission {
+  name: string;
+  duration?: number;
+  submittedAt: number;
+  status: 'pending' | 'graded' | 'error';
+  gradedAt?: number;
+  result?: GradeResult;
+  report?: string;      // lời nhận xét gửi phụ huynh (cô có thể sửa)
+  error?: string;
+}
 
 export interface ClassData {
   info: ClassInfo | null;
   students: Record<string, StudentInfo>;
   results: Record<string, Record<string, LessonResult>>;
   assignments: Record<string, Assignment>;
+  /** submissions[assignmentId][studentId] — KHÔNG kèm file ghi âm (tải riêng khi cần) */
+  submissions: Record<string, Record<string, Submission>>;
 }
 
 // ---------------- Session ----------------
@@ -175,31 +211,167 @@ export const listenTeacherClasses = (
     e => onError?.(friendlyError(e)),
   );
 
-export const listenClass = (code: string, cb: (data: ClassData) => void, onError?: (e: Error) => void) =>
-  onValue(
-    ref(getDb(), `classes/${code}`),
-    snap => {
-      const v = snap.val() || {};
-      cb({
-        info: v.info || null,
-        students: v.students || {},
-        results: v.results || {},
-        assignments: v.assignments || {},
-      });
-    },
-    e => onError?.(friendlyError(e)),
+/** Nghe từng nhánh riêng để KHÔNG tải file ghi âm (nặng) của cả lớp. */
+export const listenClass = (code: string, cb: (data: ClassData) => void, onError?: (e: Error) => void) => {
+  const parts = ['info', 'students', 'results', 'assignments', 'submissions'] as const;
+  const state: any = { info: null, students: {}, results: {}, assignments: {}, submissions: {} };
+  const loaded = new Set<string>();
+  const unsubs = parts.map(p =>
+    onValue(
+      ref(getDb(), `classes/${code}/${p}`),
+      snap => {
+        state[p] = snap.val() || (p === 'info' ? null : {});
+        loaded.add(p);
+        if (loaded.size === parts.length) cb({ ...state });
+      },
+      e => onError?.(friendlyError(e)),
+    ),
   );
+  return () => unsubs.forEach(u => u());
+};
 
-export const addAssignment = async (code: string, topic: string, level: string, note = '') => {
+export const addAssignment = async (
+  code: string,
+  topic: string,
+  level: string,
+  note = '',
+  lesson?: { readingText: string; translation?: string; vocabulary?: VocabItem[] },
+) => {
   if (!topic.trim()) throw new Error('Vui lòng nhập chủ đề cần giao.');
   const id = `a_${Date.now()}`;
-  await set(ref(getDb(), `classes/${code}/assignments/${id}`), {
-    topic: topic.trim(), level, note: note.trim(), createdAt: serverTimestamp(),
+  const data: Record<string, any> = { topic: topic.trim(), level, note: note.trim(), createdAt: serverTimestamp() };
+  if (lesson?.readingText?.trim()) {
+    data.readingText = lesson.readingText.trim();
+    if (lesson.translation) data.translation = lesson.translation.trim();
+    if (lesson.vocabulary?.length) {
+      data.vocabulary = lesson.vocabulary.slice(0, 20).map(v => ({
+        word: String(v.word || ''), ipa: String(v.ipa || ''), meaning: String(v.meaning || ''), emoji: String(v.emoji || ''),
+      }));
+    }
+  }
+  await set(ref(getDb(), `classes/${code}/assignments/${id}`), data);
+  return id;
+};
+
+// ---------------- Bài nộp & chấm ----------------
+/** HS nộp file ghi âm bài cô giao (WAV base64). File lưu riêng ở nhánh audio. */
+export const submitRecording = async (
+  s: StudentSession, aid: string, a: Assignment, audioBase64: string, duration: number,
+) => {
+  try {
+    await update(ref(getDb()), {
+      [`classes/${s.code}/audio/${aid}/${s.sid}`]: audioBase64,
+      [`classes/${s.code}/submissions/${aid}/${s.sid}`]: {
+        name: s.name, duration: Math.round(duration * 10) / 10, submittedAt: serverTimestamp(), status: 'pending',
+      },
+      [`classes/${s.code}/results/${s.sid}/${aid}`]: {
+        topic: a.topic, level: a.level, createdAt: serverTimestamp(), submitted: true, submittedAt: serverTimestamp(),
+      },
+      [`classes/${s.code}/students/${s.sid}/lastActive`]: serverTimestamp(),
+    });
+  } catch (e) {
+    throw friendlyError(e);
+  }
+};
+
+export const listenMySubmissions = (s: StudentSession, cb: (subs: Record<string, Submission>) => void) => {
+  // Lấy toàn bộ submissions của lớp rồi lọc bài của con (không kèm file ghi âm)
+  return onValue(ref(getDb(), `classes/${s.code}/submissions`), snap => {
+    const all = (snap.val() || {}) as Record<string, Record<string, Submission>>;
+    const mine: Record<string, Submission> = {};
+    Object.entries(all).forEach(([aid, bySid]) => { if (bySid?.[s.sid]) mine[aid] = bySid[s.sid]; });
+    cb(mine);
+  }, () => cb({}));
+};
+
+export const fetchRecording = async (code: string, aid: string, sid: string): Promise<string | null> => {
+  const snap = await get(ref(getDb(), `classes/${code}/audio/${aid}/${sid}`));
+  return snap.exists() ? String(snap.val()) : null;
+};
+
+export const saveGrade = async (
+  code: string, aid: string, sid: string, result: GradeResult, report: string,
+) => {
+  const clean = JSON.parse(JSON.stringify(result)); // bỏ undefined
+  await update(ref(getDb()), {
+    [`classes/${code}/submissions/${aid}/${sid}/status`]: 'graded',
+    [`classes/${code}/submissions/${aid}/${sid}/gradedAt`]: serverTimestamp(),
+    [`classes/${code}/submissions/${aid}/${sid}/result`]: clean,
+    [`classes/${code}/submissions/${aid}/${sid}/report`]: report,
+    [`classes/${code}/submissions/${aid}/${sid}/error`]: null,
+    [`classes/${code}/results/${sid}/${aid}/speakingScore`]: result.isSilent ? 0 : result.score,
   });
 };
 
+export const saveReportText = (code: string, aid: string, sid: string, report: string) =>
+  set(ref(getDb(), `classes/${code}/submissions/${aid}/${sid}/report`), report);
+
+export const markGradeError = (code: string, aid: string, sid: string, msg: string) =>
+  update(ref(getDb(), `classes/${code}/submissions/${aid}/${sid}`), { status: 'error', error: msg.slice(0, 300) });
+
+export const resetToPending = (code: string, aid: string, sid: string) =>
+  update(ref(getDb(), `classes/${code}/submissions/${aid}/${sid}`), { status: 'pending', error: null });
+
+// ---------------- Cài đặt giáo viên ----------------
+export const DEFAULT_CALL_NAME = 'Cô Lý';
+export const listenCallName = (cb: (name: string) => void) =>
+  onValue(ref(getDb(), `teachers/${TEACHER_ID}/callName`), snap => cb(snap.val() || DEFAULT_CALL_NAME), () => cb(DEFAULT_CALL_NAME));
+export const saveCallName = (name: string) =>
+  set(ref(getDb(), `teachers/${TEACHER_ID}/callName`), name.trim().slice(0, 40) || DEFAULT_CALL_NAME);
+
+/** Lời nhận xét gửi phụ huynh — theo đúng mẫu của cô. */
+export const buildParentReport = (r: GradeResult, callName = DEFAULT_CALL_NAME): string => {
+  const f = (n?: number) => (typeof n === 'number' ? n.toFixed(1) : '—');
+  const L: string[] = [];
+  L.push(`${callName} cảm ơn bố/mẹ ạ! ❤️ Cô đã nhận được bài luyện đọc của con rồi ạ!`);
+  L.push('Cô xin gửi lại bố/mẹ nhận xét bài của con như sau:');
+  if (r.isSilent) {
+    L.push('');
+    L.push('◦ Bài ghi âm của con chưa nghe được tiếng (micro chưa thu được). Bố/mẹ giúp con kiểm tra micro và cho con đọc lại, nộp lại bài nhé ạ.');
+  } else {
+    L.push('');
+    L.push('🌟 Ưu điểm:');
+    L.push(`◦ Phong thái: ${r.strengthsSummary?.attitude || 'Con rất tự tin, giọng đọc to, rõ ràng.'}`);
+    const good = r.strengthsSummary?.goodWords || [];
+    if (good.length) L.push(`◦ Phát âm tốt: ${good.join(', ')}.`);
+    L.push('');
+    L.push('📝 Điểm cần cải thiện:');
+    const imp = r.improvementsList || [];
+    if (imp.length) {
+      imp.forEach(i => {
+        const ipa = i.ipa ? ` /${i.ipa.replace(/^\/|\/$/g, '')}/` : '';
+        L.push(`◦ ${i.word}${ipa}: ${i.detail}`);
+      });
+    } else {
+      L.push('◦ Con phát âm các từ trong bài rất tốt, tiếp tục phát huy nhé!');
+    }
+    L.push('');
+    L.push('📊 Đánh giá:');
+    const c = r.criteriaScores;
+    L.push(`🏆 Tổng điểm: ${f(r.score)}/10`);
+    L.push(`🗣️ Phát âm: ${f(c?.pronunciation ?? r.score)}/10`);
+    L.push(`🌊 Trôi chảy: ${f(c?.fluency ?? r.score)}/10`);
+    L.push(`🎵 Ngữ điệu: ${f(c?.intonation ?? r.score)}/10`);
+    L.push(`📖 Ngữ pháp: ${f(c?.grammar ?? r.score)}/10`);
+    const rev = r.reviewItems || [];
+    if (rev.length) {
+      L.push('');
+      L.push('📚 Con cần ôn thêm:');
+      rev.forEach(i => L.push(`◦ ${i.original} → sửa đúng thành ${i.corrected.replace(/\.?$/, '.')}`));
+    }
+  }
+  L.push('');
+  L.push('Cô mong con tiếp tục cố gắng và duy trì tinh thần học tập thật tốt nhé! ❤️');
+  L.push('Cô xin cảm ơn bố mẹ đã luôn đồng hành cùng cô và con ạ!');
+  return L.join('\n');
+};
+
 export const removeAssignment = (code: string, id: string) =>
-  remove(ref(getDb(), `classes/${code}/assignments/${id}`));
+  update(ref(getDb()), {
+    [`classes/${code}/assignments/${id}`]: null,
+    [`classes/${code}/submissions/${id}`]: null,
+    [`classes/${code}/audio/${id}`]: null,
+  });
 
 export const removeStudent = (code: string, sid: string) =>
   update(ref(getDb()), {

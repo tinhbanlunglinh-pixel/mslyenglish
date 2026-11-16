@@ -21,8 +21,12 @@ type RecordingMode = 'pcm' | 'mediarecorder' | null;
 export function useRecorder(
   readingText: string | null,
   level: EnglishLevel,
-  setError: (error: string | null) => void
+  setError: (error: string | null) => void,
+  /** Nếu có: chỉ thu âm rồi trả WAV base64 (không gọi AI chấm) — dùng cho bài cô giao */
+  onCaptured?: (wavBase64: string, durationSecs: number) => void
 ): UseRecorderReturn {
+  const onCapturedRef = useRef(onCaptured);
+  onCapturedRef.current = onCaptured;
   const [isRecording, setIsRecording] = useState(false);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluation, setEvaluation] = useState<EvaluationResult | null>(null);
@@ -100,7 +104,7 @@ export function useRecorder(
     const currentText = readingTextRef.current;
     const currentLevel = levelRef.current;
 
-    if (!currentText) {
+    if (!currentText && !onCapturedRef.current) {
       setIsEvaluating(false);
       setError('Không có nội dung bài đọc để chấm điểm. Vui lòng tạo bài đọc trước.');
       return;
@@ -127,7 +131,13 @@ export function useRecorder(
         reader.readAsDataURL(wavBlob);
       });
 
-      const result = await evaluateSpeech(currentText, base64Audio, currentLevel, 'audio/wav');
+      if (onCapturedRef.current) {
+        onCapturedRef.current(base64Audio, durationSecs);
+        setIsEvaluating(false);
+        return;
+      }
+
+      const result = await evaluateSpeech(currentText!, base64Audio, currentLevel, 'audio/wav');
       setEvaluation(result);
       setIsEvaluating(false);
     } catch (err: any) {

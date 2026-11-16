@@ -1,12 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Copy, Check, LogOut, Mic, Users, BookOpen, Trash2, KeyRound, ChevronDown, ChevronRight, X, RefreshCw,
+  Sparkles, ClipboardCheck, Play, FileText, Zap, AlertTriangle,
 } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
+import { ApiKeyModal } from '../ApiKeyModal';
+import { ReportModal } from './ReportModal';
 import {
-  Assignment, ClassData, LessonResult, StudentInfo, addAssignment, changeTeacherPassword, createClass, deleteClass,
-  listenClass, listenTeacherClasses, removeAssignment, removeStudent,
+  Assignment, ClassData, LessonResult, StudentInfo, Submission, VocabItem, addAssignment, changeTeacherPassword,
+  createClass, deleteClass, fetchRecording, listenCallName, listenClass, listenTeacherClasses, removeAssignment,
+  removeStudent, resetToPending, saveCallName, DEFAULT_CALL_NAME,
 } from '../../services/classroom';
+import { generateContent, getAiProvider, getApiKeyForProvider, getSelectedModel, EnglishLevel } from '../../services/geminiService';
+import { gradeSubmission, friendlyAiError } from '../../services/grading';
 
 const LEVELS = ['Starters', 'Movers', 'Flyers', 'A1', 'A2', 'B1', 'B2'];
 
@@ -34,10 +40,62 @@ export const TeacherPanel: React.FC<Props> = ({ onOpenStudio, onLogout }) => {
   const [newClass, setNewClass] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<'students' | 'assign'>('students');
+  const [tab, setTab] = useState<'students' | 'assign' | 'grade'>('students');
   const [copied, setCopied] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [showPass, setShowPass] = useState(false);
+
+  // API key Gemini của cô (chỉ lưu trên máy cô)
+  const [apiKey, setApiKey] = useState(() => getApiKeyForProvider());
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [callName, setCallName] = useState(DEFAULT_CALL_NAME);
+  useEffect(() => listenCallName(setCallName), []);
+
+  // ---- Tự động chấm bài nộp (chạy trên máy cô) ----
+  const [autoGrade, setAutoGrade] = useState(() => {
+    try { return localStorage.getItem('msly_auto_grade') !== '0'; } catch { return true; }
+  });
+  const [gradingKey, setGradingKey] = useState<string | null>(null);
+  const [gradeError, setGradeError] = useState<string | null>(null);
+  const gradingRef = useRef(false);
+  const failedRef = useRef<Set<string>>(new Set());
+
+  const runGrade = async (aid: string, sid: string) => {
+    if (!selected || !data || gradingRef.current) return;
+    const a = data.assignments[aid];
+    if (!a) return;
+    gradingRef.current = true;
+    setGradingKey(`${aid}/${sid}`);
+    setGradeError(null);
+    try {
+      await gradeSubmission(selected, aid, sid, a, callName);
+      failedRef.current.delete(`${selected}/${aid}/${sid}`);
+    } catch (e: any) {
+      failedRef.current.add(`${selected}/${aid}/${sid}`);
+      setGradeError(`${data.submissions[aid]?.[sid]?.name || 'Bài nộp'}: ${e.message}`);
+    } finally {
+      gradingRef.current = false;
+      setGradingKey(null);
+    }
+  };
+
+  const pendingList = useMemo(() => {
+    if (!data) return [] as { aid: string; sid: string }[];
+    const out: { aid: string; sid: string; t: number }[] = [];
+    Object.entries(data.submissions || {}).forEach(([aid, bySid]) => {
+      if (!data.assignments[aid]?.readingText) return;
+      Object.entries(bySid || {}).forEach(([sid, s]) => {
+        if ((s as Submission).status === 'pending') out.push({ aid, sid, t: (s as Submission).submittedAt || 0 });
+      });
+    });
+    return out.sort((x, y) => x.t - y.t);
+  }, [data]);
+
+  useEffect(() => {
+    if (!autoGrade || !apiKey || gradingRef.current || !selected) return;
+    const next = pendingList.find(p => !failedRef.current.has(`${selected}/${p.aid}/${p.sid}`));
+    if (next) runGrade(next.aid, next.sid);
+  }, [pendingList, autoGrade, apiKey, gradingKey, selected]);
 
   useEffect(() => listenTeacherClasses(
     c => { setClasses(c); setLoadingClasses(false); },
@@ -103,6 +161,10 @@ export const TeacherPanel: React.FC<Props> = ({ onOpenStudio, onLogout }) => {
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
             <button onClick={onOpenStudio} className="flex items-center gap-1.5 bg-brand-yellow text-slate-900 font-black text-xs sm:text-sm px-3 py-2 rounded-xl hover:brightness-95">
               <Mic size={16} /> <span className="hidden sm:inline">Phòng luyện nói</span>
+            </button>
+            <button onClick={() => setShowKeyModal(true)} title="API key Gemini của cô (dùng để tạo bài và chấm bài)"
+              className={`flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-black ${apiKey ? 'bg-white/15 text-white hover:bg-white/25' : 'bg-amber-400 text-slate-900 animate-pulse'}`}>
+              <Zap size={16} /> <span className="hidden md:inline">{apiKey ? 'API key' : 'Nhập API key'}</span>
             </button>
             <button onClick={() => setShowPass(true)} title="Đổi mật khẩu" className="p-2 rounded-xl bg-white/15 text-white hover:bg-white/25">
               <KeyRound size={18} />
@@ -185,11 +247,14 @@ export const TeacherPanel: React.FC<Props> = ({ onOpenStudio, onLogout }) => {
               </div>
 
               <div className="flex gap-2 bg-white p-1.5 rounded-2xl shadow border border-emerald-100">
-                {([['students', 'Kết quả học sinh', Users], ['assign', 'Giao chủ đề', BookOpen]] as const).map(([k, label, Icon]) => (
+                {([['students', 'Kết quả', Users], ['assign', 'Giao bài nói', BookOpen], ['grade', 'Chấm & báo cáo', ClipboardCheck]] as const).map(([k, label, Icon]) => (
                   <button key={k} onClick={() => setTab(k)}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-sm transition-all ${
+                    className={`relative flex-1 flex items-center justify-center gap-1.5 py-2.5 px-1 rounded-xl font-black text-xs sm:text-sm transition-all ${
                       tab === k ? 'bg-brand-green text-white shadow' : 'text-slate-600 hover:bg-slate-100'}`}>
-                    <Icon size={16} /> {label}
+                    <Icon size={16} className="shrink-0" /> {label}
+                    {k === 'grade' && pendingList.length > 0 && (
+                      <span className="absolute -top-1.5 -right-1 min-w-5 h-5 px-1 rounded-full bg-amber-400 text-slate-900 text-[10px] font-black flex items-center justify-center">{pendingList.length}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -201,8 +266,18 @@ export const TeacherPanel: React.FC<Props> = ({ onOpenStudio, onLogout }) => {
                   onRemove={async (sid, name) => {
                     if (confirm(`Xoá học sinh "${name}" và toàn bộ kết quả của con khỏi lớp?`)) await removeStudent(selected, sid);
                   }} />
+              ) : tab === 'assign' ? (
+                <AssignTab code={selected} data={data} onError={setError} hasKey={!!apiKey} onNeedKey={() => setShowKeyModal(true)} />
               ) : (
-                <AssignTab code={selected} data={data} onError={setError} />
+                <GradeTab
+                  code={selected} className={classes[selected]?.name || ''} data={data} hasKey={!!apiKey}
+                  onNeedKey={() => setShowKeyModal(true)} callName={callName}
+                  autoGrade={autoGrade}
+                  setAutoGrade={v => { setAutoGrade(v); try { localStorage.setItem('msly_auto_grade', v ? '1' : '0'); } catch { /* bỏ qua */ } }}
+                  gradingKey={gradingKey} gradeError={gradeError}
+                  onGrade={(aid, sid) => { failedRef.current.delete(`${selected}/${aid}/${sid}`); runGrade(aid, sid); }}
+                  onRetry={async (aid, sid) => { failedRef.current.delete(`${selected}/${aid}/${sid}`); await resetToPending(selected, aid, sid); }}
+                />
               )}
 
               <div className="text-right">
@@ -223,6 +298,15 @@ export const TeacherPanel: React.FC<Props> = ({ onOpenStudio, onLogout }) => {
       </main>
 
       {showPass && <ChangePasswordModal onClose={() => setShowPass(false)} />}
+
+      <ApiKeyModal
+        show={showKeyModal}
+        currentApiKey={apiKey}
+        initialProvider={getAiProvider()}
+        initialModel={getSelectedModel()}
+        onSave={k => { setApiKey(k); setShowKeyModal(false); failedRef.current.clear(); setGradeError(null); }}
+        onClose={() => setShowKeyModal(false)}
+      />
     </div>
   );
 };
@@ -309,27 +393,66 @@ const StudentsTable: React.FC<{
   );
 };
 
-// ---------------- Giao chủ đề ----------------
-const AssignTab: React.FC<{ code: string; data: ClassData; onError: (m: string) => void }> = ({ code, data, onError }) => {
-  const [topic, setTopic] = useState('');
+// ---------------- Giao bài nói (cô tạo bằng AI) ----------------
+const AssignTab: React.FC<{
+  code: string; data: ClassData; onError: (m: string) => void; hasKey: boolean; onNeedKey: () => void;
+}> = ({ code, data, onError, hasKey, onNeedKey }) => {
+  const [mode, setMode] = useState<'generate' | 'useInput'>('generate');
+  const [input, setInput] = useState('');
   const [level, setLevel] = useState('Starters');
   const [note, setNote] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'' | 'gen' | 'save'>('');
+  const [draft, setDraft] = useState<{ topic: string; readingText: string; translation: string; vocabulary: VocabItem[] } | null>(null);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const list = (Object.entries(data.assignments) as [string, Assignment][]).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+
+  const generate = async () => {
+    if (!hasKey) { onNeedKey(); return; }
+    if (!input.trim()) { onError(mode === 'generate' ? 'Cô nhập chủ đề hoặc từ vựng trước nhé.' : 'Cô dán đoạn văn tiếng Anh trước nhé.'); return; }
+    setBusy('gen'); setSavedMsg(null);
+    try {
+      const r = await generateContent(input.trim(), level as EnglishLevel, mode);
+      setDraft({ topic: r.topicName || input.trim().slice(0, 60), readingText: r.readingText, translation: r.translation, vocabulary: r.vocabulary || [] });
+    } catch (e: any) {
+      onError(friendlyAiError(e));
+    } finally { setBusy(''); }
+  };
+
+  const assign = async () => {
+    if (!draft) return;
+    if (!draft.readingText.trim()) { onError('Bài đọc đang trống.'); return; }
+    setBusy('save');
+    try {
+      await addAssignment(code, draft.topic, level, note, draft);
+      setDraft(null); setInput(''); setNote('');
+      setSavedMsg('Đã giao bài cho cả lớp. Học sinh mở app là thấy ngay, không cần API key.');
+    } catch (e: any) { onError(e.message); } finally { setBusy(''); }
+  };
 
   return (
     <div className="space-y-4">
-      <form
-        onSubmit={async e => {
-          e.preventDefault(); setBusy(true);
-          try { await addAssignment(code, topic, level, note); setTopic(''); setNote(''); }
-          catch (err: any) { onError(err.message); } finally { setBusy(false); }
-        }}
-        className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-4 sm:p-5 space-y-3"
-      >
-        <p className="text-xs font-black text-emerald-600 uppercase tracking-wider">Giao chủ đề luyện nói cho cả lớp</p>
-        <input value={topic} onChange={e => setTopic(e.target.value)} placeholder="Chủ đề hoặc từ vựng, VD: My family, Animals at the zoo"
-          className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
+      <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-4 sm:p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-black text-emerald-600 uppercase tracking-wider">Tạo bài nói và giao cho cả lớp</p>
+          {!hasKey && (
+            <button onClick={onNeedKey} className="flex items-center gap-1 text-xs font-black px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800">
+              <Zap size={14} /> Cô nhập API key Gemini để tạo bài
+            </button>
+          )}
+        </div>
+        <div className="flex gap-2 bg-slate-100 p-1 rounded-xl text-xs sm:text-sm">
+          {([['generate', '💡 AI tạo bài theo chủ đề'], ['useInput', '📝 Dùng đoạn văn của cô']] as const).map(([m, label]) => (
+            <button type="button" key={m} onClick={() => setMode(m)}
+              className={`flex-1 py-2 rounded-lg font-black ${mode === m ? 'bg-white shadow text-brand-green-dark' : 'text-slate-500'}`}>{label}</button>
+          ))}
+        </div>
+        {mode === 'generate' ? (
+          <input value={input} onChange={e => setInput(e.target.value)} placeholder="Chủ đề hoặc từ vựng, VD: My family; cake, picture, seven"
+            className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
+        ) : (
+          <textarea value={input} onChange={e => setInput(e.target.value)} rows={5} placeholder="Dán đoạn văn tiếng Anh cô muốn học sinh đọc (giữ nguyên từng chữ)"
+            className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
+        )}
         <div className="flex flex-wrap gap-2">
           {LEVELS.map(l => (
             <button type="button" key={l} onClick={() => setLevel(l)}
@@ -338,33 +461,210 @@ const AssignTab: React.FC<{ code: string; data: ClassData; onError: (m: string) 
             </button>
           ))}
         </div>
-        <input value={note} onChange={e => setNote(e.target.value)} placeholder="Lời nhắn cho học sinh (không bắt buộc)"
-          className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
-        <button disabled={busy} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-green text-white font-black text-sm disabled:opacity-60">
-          {busy ? <RefreshCw size={16} className="animate-spin" /> : <Plus size={16} />} Giao chủ đề
+        <button onClick={generate} disabled={!!busy}
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-brand-green text-white font-black text-sm disabled:opacity-60">
+          {busy === 'gen' ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />}
+          {busy === 'gen' ? 'AI đang soạn bài...' : draft ? 'Tạo lại bài khác' : 'Tạo bài bằng AI'}
         </button>
-      </form>
+        {savedMsg && <p className="text-sm font-bold text-emerald-700 flex items-center gap-1"><Check size={16} /> {savedMsg}</p>}
+      </div>
+
+      {draft && (
+        <div className="bg-white rounded-3xl shadow-xl border-4 border-amber-200 p-4 sm:p-5 space-y-3">
+          <p className="text-xs font-black text-amber-700 uppercase tracking-wider">Xem lại và sửa trước khi giao</p>
+          <label className="block space-y-1">
+            <span className="text-[11px] font-black text-slate-500 uppercase">Tên bài</span>
+            <input value={draft.topic} onChange={e => setDraft({ ...draft, topic: e.target.value })}
+              className="w-full px-3 py-2 text-sm font-bold border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-[11px] font-black text-slate-500 uppercase">Bài đọc học sinh sẽ đọc to</span>
+            <textarea value={draft.readingText} onChange={e => setDraft({ ...draft, readingText: e.target.value })} rows={6}
+              className="w-full px-3 py-2 text-base leading-relaxed border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
+          </label>
+          <label className="block space-y-1">
+            <span className="text-[11px] font-black text-slate-500 uppercase">Bản dịch tiếng Việt</span>
+            <textarea value={draft.translation} onChange={e => setDraft({ ...draft, translation: e.target.value })} rows={3}
+              className="w-full px-3 py-2 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
+          </label>
+          {draft.vocabulary.length > 0 && (
+            <div className="flex flex-wrap gap-1.5">
+              {draft.vocabulary.map((v, i) => (
+                <span key={i} className="text-xs px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-100">
+                  {v.emoji} <b>{v.word}</b> {v.ipa && <span className="text-slate-400">{v.ipa}</span>} — {v.meaning}
+                </span>
+              ))}
+            </div>
+          )}
+          <input value={note} onChange={e => setNote(e.target.value)} placeholder="Lời nhắn cho học sinh (không bắt buộc), VD: Hạn nộp tối thứ Năm"
+            className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
+          <div className="flex flex-wrap gap-2">
+            <button onClick={assign} disabled={!!busy} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-green text-white font-black text-sm disabled:opacity-60">
+              {busy === 'save' ? <RefreshCw size={16} className="animate-spin" /> : <Check size={16} />} Giao bài cho lớp
+            </button>
+            <button onClick={() => setDraft(null)} className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">Bỏ bài này</button>
+          </div>
+        </div>
+      )}
 
       <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-3">
+        <p className="px-2 pt-1 pb-2 text-xs font-black text-emerald-600 uppercase tracking-wider">Bài đã giao ({list.length})</p>
         {list.length === 0 ? (
-          <p className="text-sm text-slate-400 p-3">Chưa giao chủ đề nào. Học sinh vẫn có thể tự chọn chủ đề để học.</p>
+          <p className="text-sm text-slate-400 p-3">Chưa giao bài nào.</p>
         ) : (
           <ul className="divide-y divide-slate-100">
-            {list.map(([id, a]) => (
-              <li key={id} className="flex items-center justify-between gap-3 px-2 py-2.5">
-                <div className="min-w-0">
-                  <p className="font-bold text-slate-800 truncate">{a.topic} <span className="text-xs font-black text-emerald-600 ml-1">{a.level}</span></p>
-                  {a.note && <p className="text-xs text-slate-500 truncate">{a.note}</p>}
-                </div>
-                <button title="Bỏ chủ đề" onClick={() => removeAssignment(code, id)} className="p-1.5 text-slate-300 hover:text-red-600"><Trash2 size={14} /></button>
-              </li>
-            ))}
+            {list.map(([id, a]) => {
+              const subs = Object.values(data.submissions[id] || {}) as Submission[];
+              return (
+                <li key={id} className="flex items-center justify-between gap-3 px-2 py-2.5">
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-800 truncate">{a.topic} <span className="text-xs font-black text-emerald-600 ml-1">{a.level}</span></p>
+                    <p className="text-xs text-slate-500 truncate">
+                      {a.readingText ? `${subs.length} bài nộp · ${subs.filter(s => s.status === 'graded').length} đã chấm` : 'Chỉ giao chủ đề (HS tự tạo bài, cần API key riêng)'}
+                      {a.note ? ` · ${a.note}` : ''}
+                    </p>
+                  </div>
+                  <button title="Xoá bài (xoá cả bài nộp)"
+                    onClick={() => { if (confirm(`Xoá bài "${a.topic}" và toàn bộ bài nộp của bài này?`)) removeAssignment(code, id); }}
+                    className="p-1.5 text-slate-300 hover:text-red-600"><Trash2 size={14} /></button>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
     </div>
   );
 };
+
+// ---------------- Chấm bài & báo cáo ----------------
+const GradeTab: React.FC<{
+  code: string; className: string; data: ClassData; hasKey: boolean; onNeedKey: () => void; callName: string;
+  autoGrade: boolean; setAutoGrade: (v: boolean) => void; gradingKey: string | null; gradeError: string | null;
+  onGrade: (aid: string, sid: string) => void; onRetry: (aid: string, sid: string) => void;
+}> = (p) => {
+  const [report, setReport] = useState<{ aid: string; sid: string } | null>(null);
+  const [playing, setPlaying] = useState<string | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [nameDraft, setNameDraft] = useState(p.callName);
+  useEffect(() => setNameDraft(p.callName), [p.callName]);
+  useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+
+  const rows = useMemo(() => {
+    const out: { aid: string; sid: string; a: Assignment; s: Submission }[] = [];
+    Object.entries(p.data.submissions || {}).forEach(([aid, bySid]) => {
+      const a = p.data.assignments[aid];
+      if (!a) return;
+      Object.entries(bySid || {}).forEach(([sid, s]) => out.push({ aid, sid, a, s: s as Submission }));
+    });
+    return out.sort((x, y) => (y.s.submittedAt || 0) - (x.s.submittedAt || 0));
+  }, [p.data]);
+
+  const listen = async (aid: string, sid: string) => {
+    const k = `${aid}/${sid}`;
+    setPlaying(k);
+    try {
+      const b64 = await fetchRecording(p.code, aid, sid);
+      if (!b64) throw new Error('none');
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      if (audioUrl) URL.revokeObjectURL(audioUrl);
+      setAudioUrl(URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' })));
+    } catch { setPlaying(null); alert('Không tải được file ghi âm.'); }
+  };
+
+  const open = report ? rows.find(r => r.aid === report.aid && r.sid === report.sid) : null;
+
+  return (
+    <div className="space-y-4">
+      <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-4 space-y-3">
+        <div className="flex flex-wrap items-center gap-3 justify-between">
+          <label className="flex items-center gap-2 text-sm font-bold text-slate-700 cursor-pointer">
+            <input type="checkbox" checked={p.autoGrade} onChange={e => p.setAutoGrade(e.target.checked)} className="w-4 h-4 accent-emerald-600" />
+            Tự động chấm bài mới khi cô mở bảng này
+          </label>
+          {!p.hasKey && (
+            <button onClick={p.onNeedKey} className="flex items-center gap-1 text-xs font-black px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800">
+              <Zap size={14} /> Nhập API key để chấm
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="font-bold text-slate-500">Xưng hô trong lời nhận xét:</span>
+          <input value={nameDraft} onChange={e => setNameDraft(e.target.value)} className="w-32 px-2 py-1.5 border-2 border-emerald-100 rounded-lg text-sm font-bold" />
+          {nameDraft.trim() !== p.callName && (
+            <button onClick={() => saveCallName(nameDraft)} className="px-3 py-1.5 rounded-lg bg-brand-green text-white text-xs font-black">Lưu</button>
+          )}
+        </div>
+        {p.gradingKey && (
+          <p className="text-sm font-bold text-emerald-700 flex items-center gap-2"><RefreshCw size={14} className="animate-spin" /> Đang chấm bài của {p.data.submissions[p.gradingKey.split('/')[0]]?.[p.gradingKey.split('/')[1]]?.name}...</p>
+        )}
+        {p.gradeError && <p className="text-sm font-bold text-red-600 flex items-start gap-1.5"><AlertTriangle size={16} className="shrink-0 mt-0.5" /> {p.gradeError}</p>}
+        <p className="text-[11px] text-slate-400">Bài được chấm trên máy của cô bằng API key của cô; key không gửi cho học sinh.</p>
+      </div>
+
+      {audioUrl && (
+        <div className="bg-white rounded-2xl shadow border border-emerald-100 p-3 flex items-center gap-3">
+          <span className="text-xs font-black text-slate-500 shrink-0">🎧 {playing && p.data.submissions[playing.split('/')[0]]?.[playing.split('/')[1]]?.name}</span>
+          <audio src={audioUrl} controls autoPlay className="w-full h-9" />
+        </div>
+      )}
+
+      <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 overflow-hidden">
+        {rows.length === 0 ? (
+          <p className="text-sm text-slate-400 p-6 text-center">Chưa có bài nộp. Khi học sinh nộp bài cô giao, bài sẽ hiện ở đây.</p>
+        ) : (
+          <ul className="divide-y divide-slate-100">
+            {rows.map(({ aid, sid, a, s }) => {
+              const k = `${aid}/${sid}`;
+              return (
+                <li key={k} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold text-slate-800 truncate">{s.name}</p>
+                    <p className="text-xs text-slate-500 truncate">{a.topic} · {a.level} · {fmtTime(s.submittedAt)}{s.duration ? ` · ${Math.round(s.duration)}s` : ''}</p>
+                  </div>
+                  {s.status === 'graded' && s.result ? (
+                    <span className={`text-lg font-black ${scoreColor(s.result.isSilent ? 0 : s.result.score)}`}>{s.result.isSilent ? 'Im lặng' : s.result.score.toFixed(1)}</span>
+                  ) : s.status === 'error' ? (
+                    <span className="text-xs font-black text-red-600" title={s.error}>Lỗi chấm</span>
+                  ) : (
+                    <span className="text-xs font-black px-2 py-1 rounded-full bg-amber-100 text-amber-800">{p.gradingKey === k ? 'Đang chấm…' : 'Chờ chấm'}</span>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => listen(aid, sid)} title="Nghe bài đọc" className="p-2 rounded-lg hover:bg-slate-100 text-slate-600"><Play size={16} /></button>
+                    {s.status === 'graded' && s.result ? (
+                      <button onClick={() => setReport({ aid, sid })} className="flex items-center gap-1 px-3 py-2 rounded-lg bg-brand-green text-white text-xs font-black">
+                        <FileText size={14} /> Báo cáo
+                      </button>
+                    ) : null}
+                    {(s.status === 'error' || s.status === 'graded') && (
+                      <button onClick={() => p.onRetry(aid, sid)} title="Chấm lại" className="p-2 rounded-lg hover:bg-slate-100 text-slate-500"><RefreshCw size={16} /></button>
+                    )}
+                    {s.status === 'pending' && !p.autoGrade && (
+                      <button onClick={() => (p.hasKey ? p.onGrade(aid, sid) : p.onNeedKey())} disabled={!!p.gradingKey}
+                        className="px-3 py-2 rounded-lg bg-brand-green text-white text-xs font-black disabled:opacity-50">Chấm</button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {open && open.s.result && (
+        <ReportModal
+          code={p.code} aid={open.aid} sid={open.sid}
+          studentName={open.s.name} className={p.className} lessonTopic={open.a.topic} level={open.a.level}
+          result={open.s.result} report={open.s.report || ''} callName={p.callName} gradedAt={open.s.gradedAt}
+          onClose={() => setReport(null)}
+        />
+      )}
+    </div>
+  );
+};
+
 
 // ---------------- Đổi mật khẩu ----------------
 const ChangePasswordModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {

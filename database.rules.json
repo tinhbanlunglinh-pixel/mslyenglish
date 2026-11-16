@@ -6,6 +6,7 @@
       "$tid": {
         ".read": true,
         "passHash": { ".write": true, ".validate": "newData.isString() && newData.val().length === 64" },
+        "callName": { ".write": true, ".validate": "newData.isString() && newData.val().length <= 40" },
         "classes": {
           "$code": {
             ".write": true,
@@ -29,7 +30,7 @@
         },
         "results": {
           "$sid": {
-            ".validate": "root.child('classes/' + $code + '/students/' + $sid).exists() || newData.parent().parent().child('students/' + $sid).exists()",
+            ".validate": "newData.parent().parent().child('students/' + $sid).exists()",
             "$lessonId": {
               "speakingScore": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
               "exerciseScore": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
@@ -44,7 +45,28 @@
         },
         "assignments": {
           "$aid": {
-            ".validate": "newData.hasChildren(['topic', 'level']) && newData.child('topic').val().length <= 200"
+            ".validate": "newData.hasChildren(['topic', 'level']) && newData.child('topic').isString() && newData.child('topic').val().length <= 200",
+            "readingText": { ".validate": "newData.isString() && newData.val().length <= 6000" },
+            "translation": { ".validate": "newData.isString() && newData.val().length <= 8000" }
+          }
+        },
+        "submissions": {
+          "$aid": {
+            "$sid": {
+              ".validate": "newData.hasChildren(['name', 'status']) && newData.parent().parent().parent().child('students/' + $sid).exists()",
+              "status": { ".validate": "newData.isString() && newData.val().matches(/^(pending|graded|error)$/)" },
+              "report": { ".validate": "newData.isString() && newData.val().length <= 8000" },
+              "result": {
+                "score": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" }
+              }
+            }
+          }
+        },
+        "audio": {
+          "$aid": {
+            "$sid": {
+              ".validate": "newData.isString() && newData.val().length <= 12000000 && newData.parent().parent().parent().child('students/' + $sid).exists()"
+            }
           }
         },
         "$other": { ".validate": false }
