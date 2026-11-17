@@ -640,9 +640,9 @@ async function geminiTTS(text: string, level: EnglishLevel): Promise<string> {
   const cleanedText = text.replace(/\s+/g, ' ').trim();
   
   // Build the prompt with pace instruction for young learners
-  let prompt = `Say the following text exactly: ${cleanedText}`;
+  let prompt = `Read aloud exactly, in a clear, warm, natural American English (US) accent: ${cleanedText}`;
   if (["Starters", "Movers", "Flyers"].includes(level)) {
-    prompt = `[slowly, clearly, at a pace suitable for children] ${cleanedText}`;
+    prompt = `[American English (US) accent, slowly, clearly, at a pace suitable for children] ${cleanedText}`;
   }
 
   // Use ONLY TTS-specific models (gemini-2.0-flash etc. do NOT support audio output with speechConfig)
