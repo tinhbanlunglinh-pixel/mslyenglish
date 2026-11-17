@@ -5,8 +5,14 @@
     "teachers": {
       "$tid": {
         ".read": true,
-        "passHash": { ".write": true, ".validate": "newData.isString() && newData.val().length === 64" },
-        "callName": { ".write": true, ".validate": "newData.isString() && newData.val().length <= 40" },
+        "passHash": {
+          ".write": true,
+          ".validate": "newData.isString() && newData.val().length === 64"
+        },
+        "callName": {
+          ".write": true,
+          ".validate": "newData.isString() && newData.val().length <= 40"
+        },
         "classes": {
           "$code": {
             ".write": true,
@@ -17,11 +23,33 @@
           "$lid": {
             ".write": true,
             ".validate": "!newData.exists() || (newData.hasChildren(['topic', 'level', 'readingText']) && $lid.matches(/^l_[0-9a-z_]{1,40}$/))",
-            "topic": { ".validate": "newData.isString() && newData.val().length <= 200" },
-            "level": { ".validate": "newData.isString() && newData.val().length <= 20" },
-            "readingText": { ".validate": "newData.isString() && newData.val().length <= 6000" },
-            "translation": { ".validate": "newData.isString() && newData.val().length <= 8000" },
-            "usedCount": { ".validate": "newData.isNumber()" }
+            "topic": {
+              ".validate": "newData.isString() && newData.val().length <= 200"
+            },
+            "level": {
+              ".validate": "newData.isString() && newData.val().length <= 20"
+            },
+            "readingText": {
+              ".validate": "newData.isString() && newData.val().length <= 6000"
+            },
+            "translation": {
+              ".validate": "newData.isString() && newData.val().length <= 8000"
+            },
+            "usedCount": {
+              ".validate": "newData.isNumber()"
+            },
+            "image": {
+              ".validate": "newData.isString() && newData.val().length <= 400000"
+            },
+            "hasAudio": {
+              ".validate": "newData.isBoolean()"
+            }
+          }
+        },
+        "libraryAudio": {
+          "$lid": {
+            ".write": true,
+            ".validate": "newData.isString() && newData.val().length <= 12000000"
           }
         }
       }
@@ -43,32 +71,64 @@
           "$sid": {
             ".validate": "newData.parent().parent().child('students/' + $sid).exists()",
             "$lessonId": {
-              "speakingScore": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
-              "exerciseScore": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" },
-              "topic": { ".validate": "newData.isString() && newData.val().length <= 200" },
-              "level": { ".validate": "newData.isString() && newData.val().length <= 20" },
-              "submitted": { ".validate": "newData.isBoolean()" },
-              "createdAt": { ".validate": "newData.isNumber()" },
-              "submittedAt": { ".validate": "newData.isNumber()" },
-              "$other": { ".validate": false }
+              "speakingScore": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10"
+              },
+              "exerciseScore": {
+                ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10"
+              },
+              "topic": {
+                ".validate": "newData.isString() && newData.val().length <= 200"
+              },
+              "level": {
+                ".validate": "newData.isString() && newData.val().length <= 20"
+              },
+              "submitted": {
+                ".validate": "newData.isBoolean()"
+              },
+              "createdAt": {
+                ".validate": "newData.isNumber()"
+              },
+              "submittedAt": {
+                ".validate": "newData.isNumber()"
+              },
+              "$other": {
+                ".validate": false
+              }
             }
           }
         },
         "assignments": {
           "$aid": {
             ".validate": "newData.hasChildren(['topic', 'level']) && newData.child('topic').isString() && newData.child('topic').val().length <= 200",
-            "readingText": { ".validate": "newData.isString() && newData.val().length <= 6000" },
-            "translation": { ".validate": "newData.isString() && newData.val().length <= 8000" }
+            "readingText": {
+              ".validate": "newData.isString() && newData.val().length <= 6000"
+            },
+            "translation": {
+              ".validate": "newData.isString() && newData.val().length <= 8000"
+            },
+            "image": {
+              ".validate": "newData.isString() && newData.val().length <= 400000"
+            },
+            "hasAudio": {
+              ".validate": "newData.isBoolean()"
+            }
           }
         },
         "submissions": {
           "$aid": {
             "$sid": {
               ".validate": "newData.hasChildren(['name', 'status']) && newData.parent().parent().parent().child('students/' + $sid).exists()",
-              "status": { ".validate": "newData.isString() && newData.val().matches(/^(pending|graded|error)$/)" },
-              "report": { ".validate": "newData.isString() && newData.val().length <= 8000" },
+              "status": {
+                ".validate": "newData.isString() && newData.val().matches(/^(pending|graded|error)$/)"
+              },
+              "report": {
+                ".validate": "newData.isString() && newData.val().length <= 8000"
+              },
               "result": {
-                "score": { ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10" }
+                "score": {
+                  ".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10"
+                }
               }
             }
           }
@@ -80,7 +140,14 @@
             }
           }
         },
-        "$other": { ".validate": false }
+        "$other": {
+          ".validate": false
+        },
+        "lessonAudio": {
+          "$aid": {
+            ".validate": "newData.isString() && newData.val().length <= 12000000 && newData.parent().parent().child('assignments/' + $aid).exists()"
+          }
+        }
       }
     }
   }

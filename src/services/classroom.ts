@@ -63,6 +63,10 @@ export interface Assignment {
   readingText?: string;
   translation?: string;
   vocabulary?: VocabItem[];
+  /** URL hoặc data URI ảnh minh hoạ */
+  image?: string;
+  /** Có file giọng đọc AI ở classes/{MÃ}/lessonAudio/{aid} */
+  hasAudio?: boolean;
 }
 
 /** Kết quả chấm (rút gọn từ EvaluationResult) */
@@ -235,7 +239,7 @@ export const addAssignment = async (
   topic: string,
   level: string,
   note = '',
-  lesson?: { readingText: string; translation?: string; vocabulary?: VocabItem[] },
+  lesson?: { readingText: string; translation?: string; vocabulary?: VocabItem[]; image?: string; audio?: string | null },
 ) => {
   if (!topic.trim()) throw new Error('Vui lòng nhập chủ đề cần giao.');
   const id = `a_${Date.now()}`;
@@ -243,6 +247,8 @@ export const addAssignment = async (
   if (lesson?.readingText?.trim()) {
     data.readingText = lesson.readingText.trim();
     if (lesson.translation) data.translation = lesson.translation.trim();
+    if (lesson.image && lesson.image.length <= 400000) data.image = lesson.image;
+    if (lesson.audio) data.hasAudio = true;
     if (lesson.vocabulary?.length) {
       data.vocabulary = lesson.vocabulary.slice(0, 20).map(v => ({
         word: String(v.word || ''), ipa: String(v.ipa || ''), meaning: String(v.meaning || ''), emoji: String(v.emoji || ''),
@@ -250,6 +256,9 @@ export const addAssignment = async (
     }
   }
   await set(ref(getDb(), `classes/${code}/assignments/${id}`), data);
+  if (lesson?.audio && lesson.readingText?.trim()) {
+    await set(ref(getDb(), `classes/${code}/lessonAudio/${id}`), lesson.audio);
+  }
   return id;
 };
 
@@ -323,6 +332,8 @@ export interface SavedLesson {
   createdAt: number;
   updatedAt?: number;
   usedCount?: number;
+  image?: string;
+  hasAudio?: boolean;
 }
 
 export const newLibraryId = () => `l_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
@@ -333,7 +344,7 @@ export const listenLibrary = (cb: (l: Record<string, SavedLesson>) => void) =>
 /** Lưu (hoặc ghi đè) một bài vào kho của cô. */
 export const saveToLibrary = async (
   lid: string,
-  lesson: { topic: string; level: string; readingText: string; translation?: string; vocabulary?: VocabItem[] },
+  lesson: { topic: string; level: string; readingText: string; translation?: string; vocabulary?: VocabItem[]; image?: string; audio?: string | null },
   isNew: boolean,
 ) => {
   if (!lesson.readingText?.trim()) return;
@@ -346,15 +357,31 @@ export const saveToLibrary = async (
       word: String(v.word || ''), ipa: String(v.ipa || ''), meaning: String(v.meaning || ''), emoji: String(v.emoji || ''),
     })),
     updatedAt: serverTimestamp(),
+    image: lesson.image && lesson.image.length <= 400000 ? lesson.image : null,
   };
+  if (lesson.audio !== undefined) data.hasAudio = !!lesson.audio;
   if (isNew) data.createdAt = serverTimestamp();
   await update(ref(getDb(), `teachers/${TEACHER_ID}/library/${lid}`), data);
+  if (lesson.audio !== undefined) await set(ref(getDb(), `teachers/${TEACHER_ID}/libraryAudio/${lid}`), lesson.audio || null);
 };
 
 export const markLibraryUsed = async (lid: string, prev = 0) =>
   set(ref(getDb(), `teachers/${TEACHER_ID}/library/${lid}/usedCount`), prev + 1);
 
-export const removeFromLibrary = (lid: string) => remove(ref(getDb(), `teachers/${TEACHER_ID}/library/${lid}`));
+export const removeFromLibrary = (lid: string) => update(ref(getDb()), {
+  [`teachers/${TEACHER_ID}/library/${lid}`]: null,
+  [`teachers/${TEACHER_ID}/libraryAudio/${lid}`]: null,
+});
+
+/** Giọng đọc AI (WAV base64) — tải riêng khi cần */
+export const fetchLibraryAudio = async (lid: string): Promise<string | null> => {
+  const snap = await get(ref(getDb(), `teachers/${TEACHER_ID}/libraryAudio/${lid}`));
+  return snap.exists() ? String(snap.val()) : null;
+};
+export const fetchLessonAudio = async (code: string, aid: string): Promise<string | null> => {
+  const snap = await get(ref(getDb(), `classes/${code}/lessonAudio/${aid}`));
+  return snap.exists() ? String(snap.val()) : null;
+};
 
 // ---------------- Cài đặt giáo viên ----------------
 export const DEFAULT_CALL_NAME = 'Cô Lý';
@@ -415,6 +442,7 @@ export const removeAssignment = (code: string, id: string) =>
     [`classes/${code}/assignments/${id}`]: null,
     [`classes/${code}/submissions/${id}`]: null,
     [`classes/${code}/audio/${id}`]: null,
+    [`classes/${code}/lessonAudio/${id}`]: null,
   });
 
 export const removeStudent = (code: string, sid: string) =>

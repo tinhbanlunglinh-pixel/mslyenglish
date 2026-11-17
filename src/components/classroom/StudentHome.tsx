@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useMemo } from 'react';
+import { LessonCard } from './LessonCard';
 import {
   LogOut, Mic, Square, Volume2, RefreshCw, Send, ArrowLeft, Languages, CheckCircle2, Clock, Sparkles, BookOpen,
 } from 'lucide-react';
@@ -7,6 +8,7 @@ import {
   Assignment, StudentSession, Submission, listenAssignments, listenMySubmissions, submitRecording,
   buildParentReport, listenCallName, DEFAULT_CALL_NAME,
 } from '../../services/classroom';
+import { fetchLessonAudio } from '../../services/classroom';
 import { speakWithBrowser, stopBrowserTTS, EnglishLevel } from '../../services/geminiService';
 import { useRecorder } from '../../hooks/useRecorder';
 
@@ -80,7 +82,9 @@ export const StudentHome: React.FC<Props> = ({ session, onLogout, onOpenStudio }
                   return (
                     <li key={id}>
                       <button onClick={() => setOpenId(id)}
-                        className="w-full text-left bg-white rounded-3xl shadow-lg border-4 border-emerald-100 hover:border-brand-green p-4 transition-all">
+                        className="w-full text-left bg-white rounded-3xl shadow-lg border-4 border-emerald-100 hover:border-brand-green overflow-hidden transition-all">
+                        {a.image && <img src={a.image} alt="" loading="lazy" onError={e => { e.currentTarget.style.display = 'none'; }} className="w-full aspect-[2/1] object-cover bg-slate-100" />}
+                        <div className="p-4">
                         <div className="flex items-start justify-between gap-2">
                           <p className="font-black text-slate-800">{a.topic}</p>
                           <span className="shrink-0 text-[11px] font-black px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700">{a.level}</span>
@@ -95,6 +99,7 @@ export const StudentHome: React.FC<Props> = ({ session, onLogout, onOpenStudio }
                           ) : (
                             <span className="text-sky-700 flex items-center gap-1"><Clock size={13} /> Đã nộp — chờ cô chấm</span>
                           )}
+                        </div>
                         </div>
                       </button>
                     </li>
@@ -119,7 +124,7 @@ export const StudentHome: React.FC<Props> = ({ session, onLogout, onOpenStudio }
 const LessonRunner: React.FC<{
   session: StudentSession; aid: string; a: Assignment; sub?: Submission; callName: string; onBack: () => void;
 }> = ({ session, aid, a, sub, callName, onBack }) => {
-  const [showVi, setShowVi] = useState(false);
+  const loadAudio = useMemo(() => (a.hasAudio ? () => fetchLessonAudio(session.code, aid) : undefined), [a.hasAudio, session.code, aid]);
   const [error, setError] = useState<string | null>(null);
   const [captured, setCaptured] = useState<{ b64: string; dur: number } | null>(null);
   const [sending, setSending] = useState(false);
@@ -163,38 +168,7 @@ const LessonRunner: React.FC<{
         <ArrowLeft size={16} /> Danh sách bài
       </button>
 
-      <div className="bg-white rounded-[2rem] shadow-2xl border-4 border-emerald-100 overflow-hidden">
-        <div className="px-5 sm:px-7 py-4 bg-emerald-50/60 border-b-4 border-emerald-50 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <p className="text-[10px] font-black text-emerald-600 uppercase tracking-[0.2em]">Bài cô giao · {a.level}</p>
-            <h2 className="text-xl sm:text-2xl font-black text-brand-green-dark">{a.topic}</h2>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => speakWithBrowser(a.readingText || '', a.level as EnglishLevel)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-brand-green text-white text-sm font-black"><Volume2 size={16} /> Nghe mẫu</button>
-            {a.translation && (
-              <button onClick={() => setShowVi(v => !v)} className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 text-slate-700 text-sm font-black">
-                <Languages size={16} /> {showVi ? 'Ẩn dịch' : 'Xem dịch'}
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="px-5 sm:px-7 py-5 space-y-4">
-          <p className="text-xl sm:text-2xl leading-relaxed font-semibold text-slate-800 whitespace-pre-wrap">{a.readingText}</p>
-          {showVi && a.translation && <p className="text-base text-slate-500 italic whitespace-pre-wrap border-l-4 border-emerald-200 pl-3">{a.translation}</p>}
-          {a.vocabulary && a.vocabulary.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {a.vocabulary.map((v, i) => (
-                <button key={i} onClick={() => speakWithBrowser(v.word, a.level as EnglishLevel)}
-                  className="text-sm px-2.5 py-1 rounded-lg bg-emerald-50 border border-emerald-100 hover:bg-emerald-100">
-                  {v.emoji} <b>{v.word}</b> {v.ipa && <span className="text-slate-400 text-xs">{v.ipa}</span>} <span className="text-slate-500">· {v.meaning}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      <LessonCard a={a} loadAudio={loadAudio} />
 
       {/* Kết quả cô chấm */}
       {graded && !redo && !sub!.result!.isSilent && (

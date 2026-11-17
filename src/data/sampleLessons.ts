@@ -14,6 +14,7 @@ export interface LibraryLesson {
   readingText: string;
   translation: string;
   vocabulary: VocabItem[];
+  image?: string;
   /** Chủ đề theo khung chuẩn (hiển thị nhỏ) */
   theme?: string;
 }
@@ -255,3 +256,6 @@ export const SAMPLE_LESSONS: Record<string, LibraryLesson> = {
     vocabulary: [v('artificial intelligence', '/ˌɑːtɪfɪʃəl ɪnˈtelɪdʒəns/', 'trí tuệ nhân tạo', '🤖'), v('personalised', '/ˈpɜːsənəlaɪzd/', 'cá nhân hoá', '🎯'), v('afford', '/əˈfɔːd/', 'có đủ điều kiện (chi trả)', '💰'), v('critical thinking', '/ˈkrɪtɪkəl ˈθɪŋkɪŋ/', 'tư duy phản biện', '🧠'), v('accurate', '/ˈækjərət/', 'chính xác', '✔️')],
   },
 };
+
+// Ảnh minh hoạ soạn sẵn cho từng bài mẫu (public/lessons/{id}.jpg)
+for (const [id, l] of Object.entries(SAMPLE_LESSONS)) l.image = `/lessons/${id}.jpg`;
