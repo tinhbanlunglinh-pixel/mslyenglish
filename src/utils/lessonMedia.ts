@@ -6,6 +6,7 @@
 // ============================================================
 import { generateImage, generateAudio, BROWSER_TTS_SIGNAL, EnglishLevel } from '../services/geminiService';
 import { pcmToWav } from './audioUtils';
+import { getTtsProvider, elSpeak } from '../services/elevenlabs';
 
 const IMG_STYLE = ', cute colorful children\'s picture book illustration, bright cheerful colors, no text, no letters';
 
@@ -46,6 +47,8 @@ const blobToBase64 = (b: Blob): Promise<string> =>
 
 /** Tạo giọng đọc AI. Trả về WAV 16 kHz base64; null nếu key không tạo được (dùng giọng trình duyệt). */
 export const makeLessonAudio = async (text: string, level: string): Promise<string | null> => {
+  // ElevenLabs (nếu cô chọn & có key) → MP3 base64; lỗi thì báo rõ lý do
+  if (getTtsProvider() === 'elevenlabs') return await elSpeak(text, level);
   const url = await generateAudio(text, level as EnglishLevel);
   if (!url || url === BROWSER_TTS_SIGNAL) return null;
   try {
@@ -74,5 +77,6 @@ export const wavB64ToUrl = (b64: string): string => {
   const bin = atob(b64);
   const bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
+  const type = b64.startsWith('UklGR') ? 'audio/wav' : 'audio/mpeg'; // WAV (Leda) hoặc MP3 (ElevenLabs)
+  return URL.createObjectURL(new Blob([bytes], { type }));
 };

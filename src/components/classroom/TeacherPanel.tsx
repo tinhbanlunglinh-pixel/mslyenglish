@@ -14,6 +14,8 @@ import {
   listenSampleAudioDone, fetchSampleAudio, saveSampleAudio,
 } from '../../services/classroom';
 import { LessonCard, RecorderPreview } from './LessonCard';
+import { VoiceSettings } from './VoiceSettings';
+import { getTtsProvider } from '../../services/elevenlabs';
 import { makeLessonImage, makeLessonAudio } from '../../utils/lessonMedia';
 import { SAMPLE_LESSONS, LEVEL_INFO } from '../../data/sampleLessons';
 
@@ -436,29 +438,29 @@ const AssignTab: React.FC<{
 
   /** Tạo giọng Leda cho mọi bài mẫu còn thiếu (key của cô), lần lượt từng bài */
   const runBulk = async () => {
-    if (!hasKey) { onNeedKey(); return; }
+    if (!hasKey && getTtsProvider() !== 'elevenlabs') { onNeedKey(); return; }
     const todo = sampleIds.filter(id => !sampleDone[id]);
     if (!todo.length) return;
     bulkStop.current = false;
-    let done = 0, fails = 0;
+    let done = 0, fails = 0, lastErr = '';
     setBulk({ running: true, done: 0, total: todo.length });
     for (const id of todo) {
       if (bulkStop.current) break;
       const l = SAMPLE_LESSONS[id];
       setBulk({ running: true, done, total: todo.length, current: `${l.level} · ${l.topic}` });
-      const b64 = await makeLessonAudio(l.readingText, l.level).catch(() => null);
+      const b64 = await makeLessonAudio(l.readingText, l.level).catch((e: any) => { lastErr = e?.message || ''; return null; });
       if (b64) {
         try { await saveSampleAudio(id, b64); done++; fails = 0; } catch { fails++; }
       } else fails++;
       if (fails >= 2) {
         setBulk({ running: false, done, total: todo.length,
-          msg: 'Tạm dừng: key của cô đang hết lượt tạo giọng hoặc chưa hỗ trợ giọng AI. Bài đã tạo được giữ lại — lúc khác cô bấm lại để làm tiếp.' });
+          msg: (lastErr ? `Tạm dừng: ${lastErr} ` : 'Tạm dừng: key của cô đang hết lượt tạo giọng hoặc chưa hỗ trợ giọng AI. ') + 'Bài đã tạo được giữ lại — lúc khác cô bấm lại để làm tiếp.' });
         return;
       }
       await new Promise(res => setTimeout(res, 2500));
     }
     setBulk({ running: false, done, total: todo.length,
-      msg: bulkStop.current ? 'Đã dừng. Bài đã tạo được giữ lại.' : `Xong: đã tạo giọng Leda cho ${done} bài mẫu.` });
+      msg: bulkStop.current ? 'Đã dừng. Bài đã tạo được giữ lại.' : `Xong: đã tạo giọng AI cho ${done} bài mẫu.` });
   };
   const list = (Object.entries(data.assignments) as [string, Assignment][]).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
 
@@ -503,11 +505,12 @@ const AssignTab: React.FC<{
   };
   const addAudio = async () => {
     if (!draft) return;
-    if (!hasKey) { onNeedKey(); return; }
+    if (!hasKey && getTtsProvider() !== 'elevenlabs') { onNeedKey(); return; }
     const d0 = draft;
     setMedia('audio');
     try {
-      const b64 = await makeLessonAudio(d0.readingText, level);
+      const b64 = await makeLessonAudio(d0.readingText, level).catch((e: any) => { onError(e?.message || 'Chưa tạo được giọng đọc AI.'); return undefined; });
+      if (b64 === undefined) return;
       if (!b64) { onError('Chưa tạo được giọng đọc AI (hết lượt hoặc key chưa hỗ trợ). Học sinh vẫn nghe bằng giọng đọc của máy.'); return; }
       const sameSample = !!d0.sampleId && SAMPLE_LESSONS[d0.sampleId]?.readingText === d0.readingText.trim();
       setDraft(d => (d && d.readingText === d0.readingText ? { ...d, audio: b64, sampleAudio: sameSample } : d));
@@ -539,7 +542,7 @@ const AssignTab: React.FC<{
         await saveToLibrary(lid, { ...lesson, image: img }, false).catch(() => {});
       }
       setMedia('audio');
-      const b64 = await makeLessonAudio(lesson.readingText, level);
+      const b64 = await makeLessonAudio(lesson.readingText, level).catch((e: any) => { onError(`Bài đã tạo, nhưng chưa tạo được giọng: ${e?.message || ''}`); return null; });
       if (b64) {
         setDraft(d => (d && d.libId === lid && d.readingText === lesson.readingText ? { ...d, audio: b64 } : d));
         await saveToLibrary(lid, { ...lesson, image: img || undefined, audio: b64 }, false).catch(() => {});
@@ -593,7 +596,7 @@ const AssignTab: React.FC<{
           <p className="font-bold text-slate-800 truncate">{l.topic}</p>
           <p className="text-xs text-slate-500 truncate">
             {origin === 'sample' ? (l.theme || 'Bài mẫu') : 'Cô đã tạo'} · {wc(l.readingText)} từ
-            {l.usedCount ? ` · đã giao ${l.usedCount} lần` : ''}{l.hasAudio || (origin === 'sample' && sampleDone[id]) ? ' · 🎙️ giọng Leda' : ''}
+            {l.usedCount ? ` · đã giao ${l.usedCount} lần` : ''}{l.hasAudio || (origin === 'sample' && sampleDone[id]) ? ' · 🎙️ giọng AI' : ''}
           </p>
           <p className="text-[11px] font-bold text-emerald-600">{peek === id ? '▲ Thu gọn' : '▼ Xem như học sinh'}</p>
           </span>
@@ -646,15 +649,16 @@ const AssignTab: React.FC<{
           <div className="space-y-3">
             <div className="rounded-2xl bg-gradient-to-r from-emerald-50 to-amber-50 border border-emerald-100 p-3 space-y-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-sm font-black text-slate-700">🎙️ Giọng Leda cho bài mẫu: <span className="text-emerald-700">{sampleHave}/{sampleIds.length}</span> bài đã có</p>
+                <p className="text-sm font-black text-slate-700">🎙️ Giọng AI cho bài mẫu: <span className="text-emerald-700">{sampleHave}/{sampleIds.length}</span> bài đã có</p>
                 {bulk?.running ? (
                   <button onClick={() => { bulkStop.current = true; }} className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-black text-slate-600">Dừng</button>
                 ) : sampleHave < sampleIds.length ? (
                   <button onClick={runBulk} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-brand-green text-white text-xs font-black">
-                    <Sparkles size={14} /> Tạo giọng Leda cho {sampleIds.length - sampleHave} bài còn thiếu
+                    <Sparkles size={14} /> Tạo giọng cho {sampleIds.length - sampleHave} bài còn thiếu
                   </button>
                 ) : <span className="text-xs font-black text-emerald-700">✓ Đủ cả {sampleIds.length} bài</span>}
               </div>
+              <VoiceSettings />
               {bulk?.running && (
                 <div className="space-y-1">
                   <div className="h-2 rounded-full bg-white overflow-hidden"><div className="h-full bg-brand-green transition-all" style={{ width: `${(bulk.done / Math.max(1, bulk.total)) * 100}%` }} /></div>
@@ -662,7 +666,7 @@ const AssignTab: React.FC<{
                 </div>
               )}
               {bulk?.msg && !bulk.running && <p className="text-[11px] font-bold text-slate-600">{bulk.msg}</p>}
-              <p className="text-[11px] text-slate-400">Dùng API key của cô, mỗi bài một lượt tạo giọng. Tạo xong thì mọi lớp nghe giọng Leda, không cần tạo lại.</p>
+              <p className="text-[11px] text-slate-400">Tạo xong thì mọi lớp nghe giọng này, không cần tạo lại. Bài nào đã có giọng thì giữ nguyên.</p>
             </div>
             <div className="rounded-2xl border border-emerald-100">
               <p className="px-3 pt-2.5 text-[11px] font-black text-emerald-700 uppercase tracking-wider">⭐ Bài mẫu chuẩn ({samples.length})</p>
@@ -717,7 +721,7 @@ const AssignTab: React.FC<{
               {draft.image ? '🖼️ Có ảnh' : '🖼️ Chưa có ảnh'}
             </span>
             <span className={`px-2.5 py-1 rounded-full font-black ${draft.audio ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
-              {draft.audio ? '🎙️ Giọng Leda (AI)' : draft.audio === undefined ? '🎙️ Đang tải giọng đọc…' : '🔈 Giọng đọc của máy'}
+              {draft.audio ? '🎙️ Giọng AI' : draft.audio === undefined ? '🎙️ Đang tải giọng đọc…' : '🔈 Giọng đọc của máy'}
             </span>
             {media ? (
               <span className="flex items-center gap-1 font-black text-emerald-700"><RefreshCw size={14} className="animate-spin" />
@@ -732,11 +736,11 @@ const AssignTab: React.FC<{
                 {draft.image && <button onClick={() => setDraft({ ...draft, image: undefined })} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-500">Bỏ ảnh</button>}
                 {draft.audio !== undefined && (
                   <button onClick={addAudio} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-700 hover:border-emerald-300">
-                    {draft.audio ? 'Tạo lại giọng Leda (AI)' : '+ Tạo giọng Leda (AI)'}</button>
+                    {draft.audio ? 'Tạo lại giọng AI' : '+ Tạo giọng AI'}</button>
                 )}
               </>
             )}
-            <span className="basis-full text-[11px] text-slate-400">Ảnh và giọng đọc AI dùng API key của cô. Không có giọng AI thì học sinh nghe bằng giọng đọc có sẵn của máy.</span>
+            <span className="basis-full text-[11px] text-slate-400">Ảnh dùng key Gemini; giọng AI dùng nguồn cô chọn trong Kho bài (Leda hoặc ElevenLabs). Không có giọng AI thì học sinh nghe bằng giọng đọc có sẵn của máy.</span>
           </div>
           <details className="rounded-2xl border border-slate-100 px-3 py-2 group" open={draft.origin === 'ai'}>
             <summary className="cursor-pointer text-[11px] font-black text-slate-500 uppercase py-1">✏️ Sửa nội dung bài</summary>
