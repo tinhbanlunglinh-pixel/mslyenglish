@@ -652,7 +652,7 @@ const AssignTab: React.FC<{
               {draft.image ? '🖼️ Có ảnh' : '🖼️ Chưa có ảnh'}
             </span>
             <span className={`px-2.5 py-1 rounded-full font-black ${draft.audio ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
-              {draft.audio ? '🎙️ Giọng đọc AI' : draft.audio === undefined ? '🎙️ Đang tải giọng đọc…' : '🔈 Giọng đọc của máy'}
+              {draft.audio ? '🎙️ Giọng Leda (AI)' : draft.audio === undefined ? '🎙️ Đang tải giọng đọc…' : '🔈 Giọng đọc của máy'}
             </span>
             {media ? (
               <span className="flex items-center gap-1 font-black text-emerald-700"><RefreshCw size={14} className="animate-spin" />
@@ -664,7 +664,7 @@ const AssignTab: React.FC<{
                 {draft.image && <button onClick={() => setDraft({ ...draft, image: undefined })} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-500">Bỏ ảnh</button>}
                 {draft.audio !== undefined && (
                   <button onClick={addAudio} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-700 hover:border-emerald-300">
-                    {draft.audio ? 'Tạo lại giọng đọc AI' : '+ Tạo giọng đọc AI'}</button>
+                    {draft.audio ? 'Tạo lại giọng Leda (AI)' : '+ Tạo giọng Leda (AI)'}</button>
                 )}
               </>
             )}

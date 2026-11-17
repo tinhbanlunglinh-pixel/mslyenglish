@@ -646,7 +646,8 @@ async function geminiTTS(text: string, level: EnglishLevel): Promise<string> {
   }
 
   // Use ONLY TTS-specific models (gemini-2.0-flash etc. do NOT support audio output with speechConfig)
-  const voices = ['Kore', 'Puck', 'Aoede', 'Fenrir', 'Charon'];
+  // Giọng Leda: ngữ điệu tự nhiên, truyền cảm (cô chọn) — dùng cho mọi giọng đọc AI
+  const voices = ['Leda'];
   
   for (let i = 0; i < TTS_MODELS.length; i++) {
     const model = TTS_MODELS[i];

@@ -183,7 +183,7 @@ const AudioBar: React.FC<{ text: string; level: string; loadAudio?: () => Promis
             className="w-full h-2 accent-[var(--color-brand-green)] cursor-pointer" />
           <div className="flex justify-between text-[11px] font-bold text-slate-400 mt-0.5">
             <span>{mode === 'ai' && dur ? `${fmt(pos * dur)} / ${fmt(dur)}` : `Câu ${Math.min(sentences.length, idxAt(pos) + 1)}/${sentences.length}`}</span>
-            <span>{mode === 'ai' ? 'Giọng AI · Anh Mỹ (US)' : 'Giọng Anh Mỹ (US)'}</span>
+            <span>{mode === 'ai' ? 'Giọng Leda (AI) · Anh Mỹ (US)' : 'Giọng Anh Mỹ (US)'}</span>
           </div>
         </div>
         <button onClick={restart} title="Nghe lại từ đầu" className="shrink-0 p-2 rounded-lg text-slate-400 hover:text-brand-green hover:bg-slate-50">
