@@ -14,6 +14,8 @@ import {
 } from '../../services/classroom';
 import { SAMPLE_LESSONS, LEVEL_INFO } from '../../data/sampleLessons';
 
+const EMPTY_CLASS: ClassData = { info: null, students: {}, results: {}, assignments: {}, submissions: {} };
+
 type Draft = {
   topic: string; readingText: string; translation: string; vocabulary: VocabItem[];
   origin: 'ai' | 'sample' | 'saved'; libId?: string; sampleId?: string;
@@ -224,10 +226,13 @@ export const TeacherPanel: React.FC<Props> = ({ onOpenStudio, onLogout }) => {
           )}
 
           {!selected ? (
-            <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-10 text-center text-slate-400">
+            <>
+            <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-6 sm:p-8 text-center text-slate-400">
               <Users size={48} className="mx-auto mb-3 text-emerald-200" />
-              Tạo lớp đầu tiên để nhận mã lớp gửi cho học sinh.
+              Cô chưa có lớp nào. Tạo lớp ở ô "Tạo lớp mới" để nhận mã lớp gửi học sinh — kho bài soạn sẵn ở ngay bên dưới.
             </div>
+            <AssignTab code={null} data={EMPTY_CLASS} onError={setError} hasKey={!!apiKey} onNeedKey={() => setShowKeyModal(true)} />
+              </>
           ) : (
             <>
               <div className="bg-gradient-to-br from-brand-green to-emerald-600 rounded-3xl shadow-xl p-5 sm:p-6 text-white space-y-4">
@@ -402,7 +407,7 @@ const StudentsTable: React.FC<{
 
 // ---------------- Giao bài nói (cô tạo bằng AI) ----------------
 const AssignTab: React.FC<{
-  code: string; data: ClassData; onError: (m: string) => void; hasKey: boolean; onNeedKey: () => void;
+  code: string | null; data: ClassData; onError: (m: string) => void; hasKey: boolean; onNeedKey: () => void;
 }> = ({ code, data, onError, hasKey, onNeedKey }) => {
   const [mode, setMode] = useState<'library' | 'generate' | 'useInput'>('library');
   const [input, setInput] = useState('');
@@ -451,6 +456,7 @@ const AssignTab: React.FC<{
 
   const assign = async () => {
     if (!draft) return;
+    if (!code) { onError('Cô tạo lớp trước (ô Tạo lớp mới) rồi mới giao bài được nhé. Bài trong kho vẫn giữ nguyên.'); return; }
     if (!draft.readingText.trim()) { onError('Bài đọc đang trống.'); return; }
     setBusy('save');
     try {
@@ -597,12 +603,14 @@ const AssignTab: React.FC<{
             className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
           <div className="flex flex-wrap gap-2">
             <button onClick={assign} disabled={!!busy} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-green text-white font-black text-sm disabled:opacity-60">
-              {busy === 'save' ? <RefreshCw size={16} className="animate-spin" /> : <Check size={16} />} Giao bài cho lớp
+              {busy === 'save' ? <RefreshCw size={16} className="animate-spin" /> : <Check size={16} />} {code ? 'Giao bài cho lớp' : 'Giao bài (cần tạo lớp trước)'}
             </button>
             <button onClick={() => setDraft(null)} className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">Đóng</button>
           </div>
         </div>
       )}
+
+      {code && (
 
       <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-3">
         <p className="px-2 pt-1 pb-2 text-xs font-black text-emerald-600 uppercase tracking-wider">Bài đã giao ({list.length})</p>
@@ -630,6 +638,7 @@ const AssignTab: React.FC<{
           </ul>
         )}
       </div>
+      )}
     </div>
   );
 };
