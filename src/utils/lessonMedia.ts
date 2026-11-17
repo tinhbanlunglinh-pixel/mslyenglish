@@ -30,7 +30,7 @@ export const makeLessonImage = async (prompt: string, topic: string): Promise<st
   try {
     const out = await generateImage(base.slice(0, 380) + IMG_STYLE, '16:9');
     if (out.startsWith('data:')) return await compressImage(out);
-    return out; // URL dự phòng (Pollinations)
+    return null; // ảnh dự phòng có watermark → không dùng, giữ ảnh hiện tại
   } catch {
     return null;
   }

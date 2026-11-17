@@ -13,7 +13,7 @@ import {
   SavedLesson, listenLibrary, saveToLibrary, markLibraryUsed, removeFromLibrary, newLibraryId, fetchLibraryAudio,
   listenSampleAudioDone, fetchSampleAudio, saveSampleAudio,
 } from '../../services/classroom';
-import { LessonCard } from './LessonCard';
+import { LessonCard, RecorderPreview } from './LessonCard';
 import { makeLessonImage, makeLessonAudio } from '../../utils/lessonMedia';
 import { SAMPLE_LESSONS, LEVEL_INFO } from '../../data/sampleLessons';
 
@@ -496,7 +496,7 @@ const AssignTab: React.FC<{
     setMedia('img');
     try {
       const img = await makeLessonImage('', d0.topic + ': ' + d0.readingText.slice(0, 200));
-      if (!img) { onError('Chưa tạo được ảnh (key có thể chưa hỗ trợ tạo ảnh). Bài vẫn dùng được khi không có ảnh.'); return; }
+      if (!img) { onError('Key của cô chưa tạo được ảnh AI (key miễn phí thường không có quyền tạo ảnh). Bài vẫn giữ ảnh hiện tại.'); return; }
       setDraft(d => (d && d.readingText === d0.readingText ? { ...d, image: img } : d));
       if (d0.libId) await saveToLibrary(d0.libId, { ...d0, level, image: img, audio: undefined }, false).catch(() => {});
     } finally { setMedia(''); }
@@ -610,6 +610,7 @@ const AssignTab: React.FC<{
         <div className="mt-3">
           <LessonCard label="Học sinh sẽ thấy" a={origin === 'sample' ? SAMPLE_LESSONS[id] : library[id]}
             loadAudio={origin === 'saved' ? (library[id]?.hasAudio ? peekLoader(id) : undefined) : (sampleDone[id] ? samplePeekLoader(id) : undefined)} />
+          <div className="mt-3"><RecorderPreview /></div>
         </div>
       )}
     </li>
@@ -708,7 +709,8 @@ const AssignTab: React.FC<{
           </div>
           <div className="space-y-2">
             <p className="text-[11px] font-black text-slate-500 uppercase">👀 Học sinh sẽ thấy bài như thế này</p>
-            <LessonCard a={{ ...draft, level }} loadAudio={draftLoadAudio} />
+            <LessonCard label="Học sinh sẽ thấy" a={{ ...draft, level }} loadAudio={draftLoadAudio} />
+            <RecorderPreview />
           </div>
           <div className="flex flex-wrap items-center gap-2 rounded-2xl bg-slate-50 border border-slate-100 p-3 text-xs">
             <span className={`px-2.5 py-1 rounded-full font-black ${draft.image ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
@@ -724,6 +726,9 @@ const AssignTab: React.FC<{
               <>
                 <button onClick={addImage} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-700 hover:border-emerald-300">
                   {draft.image ? 'Tạo ảnh khác (AI)' : '+ Tạo ảnh (AI)'}</button>
+                {draft.sampleId && draft.image !== SAMPLE_LESSONS[draft.sampleId]?.image && (
+                  <button onClick={() => setDraft({ ...draft, image: SAMPLE_LESSONS[draft.sampleId!]?.image })} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-700">Dùng ảnh gốc</button>
+                )}
                 {draft.image && <button onClick={() => setDraft({ ...draft, image: undefined })} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-500">Bỏ ảnh</button>}
                 {draft.audio !== undefined && (
                   <button onClick={addAudio} className="px-2.5 py-1 rounded-lg bg-white border border-slate-200 font-black text-slate-700 hover:border-emerald-300">

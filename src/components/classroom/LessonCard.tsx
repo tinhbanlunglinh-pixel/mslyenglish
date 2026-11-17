@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Play, Pause, Languages, RefreshCw, Volume2, RotateCcw } from 'lucide-react';
+import { Play, Pause, Languages, RefreshCw, Volume2, RotateCcw, Mic, Send } from 'lucide-react';
 import { stopBrowserTTS } from '../../services/geminiService';
 import { wavB64ToUrl } from '../../utils/lessonMedia';
 import type { VocabItem } from '../../services/classroom';
@@ -264,3 +264,14 @@ export const LessonCard: React.FC<{
     </div>
   );
 };
+
+/** Phần ghi âm & nộp bài — bản xem trước cho cô (học sinh thấy bản thật ngay dưới bài). */
+export const RecorderPreview: React.FC = () => (
+  <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-5 space-y-3 text-center">
+    <p className="text-sm text-slate-500">Con bấm nút, đọc to rõ cả bài, đọc xong bấm Dừng.</p>
+    <div className="mx-auto w-24 h-24 rounded-full bg-gradient-to-br from-red-500 to-rose-600 text-white shadow-xl flex items-center justify-center"><Mic size={40} /></div>
+    <p className="text-xs font-black text-rose-600 uppercase">Bắt đầu đọc</p>
+    <div className="flex justify-center"><span className="flex items-center gap-2 px-5 py-2.5 rounded-2xl bg-slate-100 text-slate-400 font-black text-sm"><Send size={16} /> Nộp bài cho cô</span></div>
+    <p className="text-[11px] text-slate-400">Xem trước: học sinh ghi âm ở đây → nghe lại → bấm "Nộp bài cho cô". Bài được chấm tự động khi cô mở Bảng giáo viên.</p>
+  </div>
+);
