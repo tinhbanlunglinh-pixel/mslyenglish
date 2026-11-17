@@ -373,6 +373,19 @@ export const removeFromLibrary = (lid: string) => update(ref(getDb()), {
   [`teachers/${TEACHER_ID}/libraryAudio/${lid}`]: null,
 });
 
+/** Giọng Leda cho bài mẫu: chỉ mục nhẹ (id → true) + file WAV tải riêng */
+export const listenSampleAudioDone = (cb: (m: Record<string, boolean>) => void) =>
+  onValue(ref(getDb(), `teachers/${TEACHER_ID}/sampleAudioDone`), snap => cb(snap.val() || {}), () => cb({}));
+export const fetchSampleAudio = async (sid: string): Promise<string | null> => {
+  const snap = await get(ref(getDb(), `teachers/${TEACHER_ID}/sampleAudio/${sid}`));
+  return snap.exists() ? String(snap.val()) : null;
+};
+export const saveSampleAudio = (sid: string, b64: string) =>
+  update(ref(getDb()), {
+    [`teachers/${TEACHER_ID}/sampleAudio/${sid}`]: b64,
+    [`teachers/${TEACHER_ID}/sampleAudioDone/${sid}`]: true,
+  });
+
 /** Giọng đọc AI (WAV base64) — tải riêng khi cần */
 export const fetchLibraryAudio = async (lid: string): Promise<string | null> => {
   const snap = await get(ref(getDb(), `teachers/${TEACHER_ID}/libraryAudio/${lid}`));

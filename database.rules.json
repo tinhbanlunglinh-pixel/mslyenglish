@@ -51,6 +51,18 @@
             ".write": true,
             ".validate": "newData.isString() && newData.val().length <= 12000000"
           }
+        },
+        "sampleAudio": {
+          "$sid": {
+            ".write": true,
+            ".validate": "$sid.matches(/^s_[a-z0-9_]{1,30}$/) && newData.isString() && newData.val().length <= 12000000"
+          }
+        },
+        "sampleAudioDone": {
+          "$sid": {
+            ".write": true,
+            ".validate": "$sid.matches(/^s_[a-z0-9_]{1,30}$/) && newData.isBoolean()"
+          }
         }
       }
     },

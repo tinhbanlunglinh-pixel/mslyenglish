@@ -11,6 +11,7 @@ import {
   createClass, deleteClass, fetchRecording, listenCallName, listenClass, listenTeacherClasses, removeAssignment,
   removeStudent, resetToPending, saveCallName, DEFAULT_CALL_NAME,
   SavedLesson, listenLibrary, saveToLibrary, markLibraryUsed, removeFromLibrary, newLibraryId, fetchLibraryAudio,
+  listenSampleAudioDone, fetchSampleAudio, saveSampleAudio,
 } from '../../services/classroom';
 import { LessonCard } from './LessonCard';
 import { makeLessonImage, makeLessonAudio } from '../../utils/lessonMedia';
@@ -22,6 +23,8 @@ type Draft = {
   topic: string; readingText: string; translation: string; vocabulary: VocabItem[];
   origin: 'ai' | 'sample' | 'saved'; libId?: string; sampleId?: string;
   image?: string;
+  /** giọng Leda lấy từ kho giọng bài mẫu (không tính là cô sửa bài) */
+  sampleAudio?: boolean;
   /** WAV base64; null = chưa có; undefined = đang tải từ kho */
   audio?: string | null;
 };
@@ -424,6 +427,39 @@ const AssignTab: React.FC<{
   const [library, setLibrary] = useState<Record<string, SavedLesson>>({});
   const [peek, setPeek] = useState<string | null>(null);
   useEffect(() => listenLibrary(setLibrary), []);
+  const [sampleDone, setSampleDone] = useState<Record<string, boolean>>({});
+  useEffect(() => listenSampleAudioDone(setSampleDone), []);
+  const [bulk, setBulk] = useState<{ running: boolean; done: number; total: number; current?: string; msg?: string } | null>(null);
+  const bulkStop = useRef(false);
+  const sampleIds = Object.keys(SAMPLE_LESSONS);
+  const sampleHave = sampleIds.filter(id => sampleDone[id]).length;
+
+  /** Tạo giọng Leda cho mọi bài mẫu còn thiếu (key của cô), lần lượt từng bài */
+  const runBulk = async () => {
+    if (!hasKey) { onNeedKey(); return; }
+    const todo = sampleIds.filter(id => !sampleDone[id]);
+    if (!todo.length) return;
+    bulkStop.current = false;
+    let done = 0, fails = 0;
+    setBulk({ running: true, done: 0, total: todo.length });
+    for (const id of todo) {
+      if (bulkStop.current) break;
+      const l = SAMPLE_LESSONS[id];
+      setBulk({ running: true, done, total: todo.length, current: `${l.level} · ${l.topic}` });
+      const b64 = await makeLessonAudio(l.readingText, l.level).catch(() => null);
+      if (b64) {
+        try { await saveSampleAudio(id, b64); done++; fails = 0; } catch { fails++; }
+      } else fails++;
+      if (fails >= 2) {
+        setBulk({ running: false, done, total: todo.length,
+          msg: 'Tạm dừng: key của cô đang hết lượt tạo giọng hoặc chưa hỗ trợ giọng AI. Bài đã tạo được giữ lại — lúc khác cô bấm lại để làm tiếp.' });
+        return;
+      }
+      await new Promise(res => setTimeout(res, 2500));
+    }
+    setBulk({ running: false, done, total: todo.length,
+      msg: bulkStop.current ? 'Đã dừng. Bài đã tạo được giữ lại.' : `Xong: đã tạo giọng Leda cho ${done} bài mẫu.` });
+  };
   const list = (Object.entries(data.assignments) as [string, Assignment][]).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
 
   const samples = Object.entries(SAMPLE_LESSONS).filter(([, l]) => l.level === level);
@@ -439,9 +475,13 @@ const AssignTab: React.FC<{
     setSavedMsg(null);
     setDraft({
       topic: l.topic, readingText: l.readingText, translation: l.translation || '', vocabulary: l.vocabulary || [],
-      image: l.image, audio: origin === 'saved' && l.hasAudio ? undefined : null,
+      image: l.image, audio: (origin === 'saved' && l.hasAudio) || (origin === 'sample' && sampleDone[id]) ? undefined : null,
+      sampleAudio: origin === 'sample' && !!sampleDone[id],
       origin, libId: origin === 'saved' ? id : undefined, sampleId: origin === 'sample' ? id : undefined,
     });
+    if (origin === 'sample' && sampleDone[id]) {
+      fetchSampleAudio(id).then(b64 => setDraft(d => (d && d.sampleId === id ? { ...d, audio: b64 } : d))).catch(() => {});
+    }
     if (origin === 'saved' && l.hasAudio) {
       fetchLibraryAudio(id).then(b64 => setDraft(d => (d && d.libId === id ? { ...d, audio: b64 } : d))).catch(() => {});
     }
@@ -469,8 +509,10 @@ const AssignTab: React.FC<{
     try {
       const b64 = await makeLessonAudio(d0.readingText, level);
       if (!b64) { onError('Chưa tạo được giọng đọc AI (hết lượt hoặc key chưa hỗ trợ). Học sinh vẫn nghe bằng giọng đọc của máy.'); return; }
-      setDraft(d => (d && d.readingText === d0.readingText ? { ...d, audio: b64 } : d));
+      const sameSample = !!d0.sampleId && SAMPLE_LESSONS[d0.sampleId]?.readingText === d0.readingText.trim();
+      setDraft(d => (d && d.readingText === d0.readingText ? { ...d, audio: b64, sampleAudio: sameSample } : d));
       if (d0.libId) await saveToLibrary(d0.libId, { ...d0, level, audio: b64 }, false).catch(() => {});
+      if (sameSample) await saveSampleAudio(d0.sampleId!, b64).catch(() => {});
     } finally { setMedia(''); }
   };
 
@@ -522,7 +564,7 @@ const AssignTab: React.FC<{
           await markLibraryUsed(draft.libId, library[draft.libId]?.usedCount || 0);
         } else if (draft.sampleId) {
           const s = SAMPLE_LESSONS[draft.sampleId];
-          if (s && (s.readingText !== draft.readingText.trim() || s.topic !== draft.topic.trim() || s.translation !== draft.translation.trim() || !!draft.audio)) {
+          if (s && (s.readingText !== draft.readingText.trim() || s.topic !== draft.topic.trim() || s.translation !== draft.translation.trim() || (!!draft.audio && !draft.sampleAudio))) {
             const lid = newLibraryId();
             await saveToLibrary(lid, { ...lesson, audio: draft.audio || null }, true);
             await markLibraryUsed(lid, 0);
@@ -538,6 +580,7 @@ const AssignTab: React.FC<{
   const draftLoadAudio = useMemo(() => (draftAudio ? async () => draftAudio : undefined), [draftAudio]);
   const peekLoaders = useRef<Record<string, () => Promise<string | null>>>({});
   const peekLoader = (id: string) => (peekLoaders.current[id] ||= () => fetchLibraryAudio(id));
+  const samplePeekLoader = (id: string) => (peekLoaders.current['S' + id] ||= () => fetchSampleAudio(id));
 
   const wc = (t: string) => t.split(/\s+/).filter(Boolean).length;
   const lessonRow = (id: string, l: { topic: string; readingText: string; theme?: string; usedCount?: number; image?: string; hasAudio?: boolean }, origin: Draft['origin']) => (
@@ -550,7 +593,7 @@ const AssignTab: React.FC<{
           <p className="font-bold text-slate-800 truncate">{l.topic}</p>
           <p className="text-xs text-slate-500 truncate">
             {origin === 'sample' ? (l.theme || 'Bài mẫu') : 'Cô đã tạo'} · {wc(l.readingText)} từ
-            {l.usedCount ? ` · đã giao ${l.usedCount} lần` : ''}{l.hasAudio ? ' · 🎙️ giọng AI' : ''}
+            {l.usedCount ? ` · đã giao ${l.usedCount} lần` : ''}{l.hasAudio || (origin === 'sample' && sampleDone[id]) ? ' · 🎙️ giọng Leda' : ''}
           </p>
           <p className="text-[11px] font-bold text-emerald-600">{peek === id ? '▲ Thu gọn' : '▼ Xem như học sinh'}</p>
           </span>
@@ -566,7 +609,7 @@ const AssignTab: React.FC<{
       {peek === id && (
         <div className="mt-3">
           <LessonCard label="Học sinh sẽ thấy" a={origin === 'sample' ? SAMPLE_LESSONS[id] : library[id]}
-            loadAudio={origin === 'saved' && library[id]?.hasAudio ? peekLoader(id) : undefined} />
+            loadAudio={origin === 'saved' ? (library[id]?.hasAudio ? peekLoader(id) : undefined) : (sampleDone[id] ? samplePeekLoader(id) : undefined)} />
         </div>
       )}
     </li>
@@ -600,6 +643,26 @@ const AssignTab: React.FC<{
         <p className="text-[11px] text-slate-400">{LEVEL_INFO[level]?.label} — {LEVEL_INFO[level]?.desc}</p>
         {mode === 'library' ? (
           <div className="space-y-3">
+            <div className="rounded-2xl bg-gradient-to-r from-emerald-50 to-amber-50 border border-emerald-100 p-3 space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-sm font-black text-slate-700">🎙️ Giọng Leda cho bài mẫu: <span className="text-emerald-700">{sampleHave}/{sampleIds.length}</span> bài đã có</p>
+                {bulk?.running ? (
+                  <button onClick={() => { bulkStop.current = true; }} className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-xs font-black text-slate-600">Dừng</button>
+                ) : sampleHave < sampleIds.length ? (
+                  <button onClick={runBulk} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-brand-green text-white text-xs font-black">
+                    <Sparkles size={14} /> Tạo giọng Leda cho {sampleIds.length - sampleHave} bài còn thiếu
+                  </button>
+                ) : <span className="text-xs font-black text-emerald-700">✓ Đủ cả {sampleIds.length} bài</span>}
+              </div>
+              {bulk?.running && (
+                <div className="space-y-1">
+                  <div className="h-2 rounded-full bg-white overflow-hidden"><div className="h-full bg-brand-green transition-all" style={{ width: `${(bulk.done / Math.max(1, bulk.total)) * 100}%` }} /></div>
+                  <p className="text-[11px] font-bold text-slate-500 flex items-center gap-1"><RefreshCw size={12} className="animate-spin" /> {bulk.done}/{bulk.total} · đang tạo: {bulk.current}</p>
+                </div>
+              )}
+              {bulk?.msg && !bulk.running && <p className="text-[11px] font-bold text-slate-600">{bulk.msg}</p>}
+              <p className="text-[11px] text-slate-400">Dùng API key của cô, mỗi bài một lượt tạo giọng. Tạo xong thì mọi lớp nghe giọng Leda, không cần tạo lại.</p>
+            </div>
             <div className="rounded-2xl border border-emerald-100">
               <p className="px-3 pt-2.5 text-[11px] font-black text-emerald-700 uppercase tracking-wider">⭐ Bài mẫu chuẩn ({samples.length})</p>
               <ul className="divide-y divide-slate-100 px-1">
@@ -680,7 +743,7 @@ const AssignTab: React.FC<{
           </label>
           <label className="block space-y-1">
             <span className="text-[11px] font-black text-slate-500 uppercase">Bài đọc học sinh sẽ đọc to</span>
-            <textarea value={draft.readingText} onChange={e => setDraft({ ...draft, readingText: e.target.value, audio: draft.audio ? null : draft.audio })} rows={6}
+            <textarea value={draft.readingText} onChange={e => setDraft({ ...draft, readingText: e.target.value, audio: draft.audio ? null : draft.audio, sampleAudio: false })} rows={6}
               className="w-full px-3 py-2 text-base leading-relaxed border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
           </label>
           <label className="block space-y-1">
