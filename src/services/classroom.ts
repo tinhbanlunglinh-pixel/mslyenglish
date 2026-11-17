@@ -312,6 +312,50 @@ export const markGradeError = (code: string, aid: string, sid: string, msg: stri
 export const resetToPending = (code: string, aid: string, sid: string) =>
   update(ref(getDb(), `classes/${code}/submissions/${aid}/${sid}`), { status: 'pending', error: null });
 
+// ---------------- Kho bài của cô ----------------
+/** Bài cô đã tạo, lưu lại để giao cho lớp khác / năm sau. teachers/msly/library/{lid} */
+export interface SavedLesson {
+  topic: string;
+  level: string;
+  readingText: string;
+  translation?: string;
+  vocabulary?: VocabItem[];
+  createdAt: number;
+  updatedAt?: number;
+  usedCount?: number;
+}
+
+export const newLibraryId = () => `l_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+export const listenLibrary = (cb: (l: Record<string, SavedLesson>) => void) =>
+  onValue(ref(getDb(), `teachers/${TEACHER_ID}/library`), snap => cb(snap.val() || {}), () => cb({}));
+
+/** Lưu (hoặc ghi đè) một bài vào kho của cô. */
+export const saveToLibrary = async (
+  lid: string,
+  lesson: { topic: string; level: string; readingText: string; translation?: string; vocabulary?: VocabItem[] },
+  isNew: boolean,
+) => {
+  if (!lesson.readingText?.trim()) return;
+  const data: Record<string, any> = {
+    topic: (lesson.topic || '').trim().slice(0, 200) || 'Bài nói',
+    level: lesson.level,
+    readingText: lesson.readingText.trim().slice(0, 6000),
+    translation: (lesson.translation || '').trim().slice(0, 8000),
+    vocabulary: (lesson.vocabulary || []).slice(0, 20).map(v => ({
+      word: String(v.word || ''), ipa: String(v.ipa || ''), meaning: String(v.meaning || ''), emoji: String(v.emoji || ''),
+    })),
+    updatedAt: serverTimestamp(),
+  };
+  if (isNew) data.createdAt = serverTimestamp();
+  await update(ref(getDb(), `teachers/${TEACHER_ID}/library/${lid}`), data);
+};
+
+export const markLibraryUsed = async (lid: string, prev = 0) =>
+  set(ref(getDb(), `teachers/${TEACHER_ID}/library/${lid}/usedCount`), prev + 1);
+
+export const removeFromLibrary = (lid: string) => remove(ref(getDb(), `teachers/${TEACHER_ID}/library/${lid}`));
+
 // ---------------- Cài đặt giáo viên ----------------
 export const DEFAULT_CALL_NAME = 'Cô Lý';
 export const listenCallName = (cb: (name: string) => void) =>

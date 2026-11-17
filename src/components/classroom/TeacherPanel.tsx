@@ -10,7 +10,14 @@ import {
   Assignment, ClassData, LessonResult, StudentInfo, Submission, VocabItem, addAssignment, changeTeacherPassword,
   createClass, deleteClass, fetchRecording, listenCallName, listenClass, listenTeacherClasses, removeAssignment,
   removeStudent, resetToPending, saveCallName, DEFAULT_CALL_NAME,
+  SavedLesson, listenLibrary, saveToLibrary, markLibraryUsed, removeFromLibrary, newLibraryId,
 } from '../../services/classroom';
+import { SAMPLE_LESSONS, LEVEL_INFO } from '../../data/sampleLessons';
+
+type Draft = {
+  topic: string; readingText: string; translation: string; vocabulary: VocabItem[];
+  origin: 'ai' | 'sample' | 'saved'; libId?: string; sampleId?: string;
+};
 import { generateContent, getAiProvider, getApiKeyForProvider, getSelectedModel, EnglishLevel } from '../../services/geminiService';
 import { gradeSubmission, friendlyAiError } from '../../services/grading';
 
@@ -397,22 +404,46 @@ const StudentsTable: React.FC<{
 const AssignTab: React.FC<{
   code: string; data: ClassData; onError: (m: string) => void; hasKey: boolean; onNeedKey: () => void;
 }> = ({ code, data, onError, hasKey, onNeedKey }) => {
-  const [mode, setMode] = useState<'generate' | 'useInput'>('generate');
+  const [mode, setMode] = useState<'library' | 'generate' | 'useInput'>('library');
   const [input, setInput] = useState('');
   const [level, setLevel] = useState('Starters');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState<'' | 'gen' | 'save'>('');
-  const [draft, setDraft] = useState<{ topic: string; readingText: string; translation: string; vocabulary: VocabItem[] } | null>(null);
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const [library, setLibrary] = useState<Record<string, SavedLesson>>({});
+  const [peek, setPeek] = useState<string | null>(null);
+  useEffect(() => listenLibrary(setLibrary), []);
   const list = (Object.entries(data.assignments) as [string, Assignment][]).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+
+  const samples = Object.entries(SAMPLE_LESSONS).filter(([, l]) => l.level === level);
+  const mine = (Object.entries(library) as [string, SavedLesson][])
+    .filter(([, l]) => l.level === level)
+    .sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
+  const countMine = (lv: string) => (Object.values(library) as SavedLesson[]).filter(l => l.level === lv).length;
+
+  const openLesson = (l: { topic: string; level: string; readingText: string; translation?: string; vocabulary?: VocabItem[] }, origin: Draft['origin'], id: string) => {
+    setLevel(l.level);
+    setSavedMsg(null);
+    setDraft({
+      topic: l.topic, readingText: l.readingText, translation: l.translation || '', vocabulary: l.vocabulary || [],
+      origin, libId: origin === 'saved' ? id : undefined, sampleId: origin === 'sample' ? id : undefined,
+    });
+    setTimeout(() => document.getElementById('assign-draft')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
 
   const generate = async () => {
     if (!hasKey) { onNeedKey(); return; }
     if (!input.trim()) { onError(mode === 'generate' ? 'Cô nhập chủ đề hoặc từ vựng trước nhé.' : 'Cô dán đoạn văn tiếng Anh trước nhé.'); return; }
     setBusy('gen'); setSavedMsg(null);
     try {
-      const r = await generateContent(input.trim(), level as EnglishLevel, mode);
-      setDraft({ topic: r.topicName || input.trim().slice(0, 60), readingText: r.readingText, translation: r.translation, vocabulary: r.vocabulary || [] });
+      const r = await generateContent(input.trim(), level as EnglishLevel, mode === 'useInput' ? 'useInput' : 'generate');
+      const lesson = { topic: r.topicName || input.trim().slice(0, 60), level, readingText: r.readingText, translation: r.translation, vocabulary: r.vocabulary || [] };
+      // Tạo đến đâu lưu đến đấy: bấm "Tạo lại" thì ghi đè bản nháp AI chưa giao, không sinh bài rác.
+      const reuse = draft?.origin === 'ai' && draft.libId ? draft.libId : null;
+      const lid = reuse || newLibraryId();
+      setDraft({ ...lesson, origin: 'ai', libId: lid });
+      try { await saveToLibrary(lid, lesson, !reuse); } catch { onError('Bài đã tạo nhưng chưa lưu được vào kho (mất mạng?).'); }
     } catch (e: any) {
       onError(friendlyAiError(e));
     } finally { setBusy(''); }
@@ -424,54 +455,120 @@ const AssignTab: React.FC<{
     setBusy('save');
     try {
       await addAssignment(code, draft.topic, level, note, draft);
+      // Cập nhật kho: bài của cô lưu cả phần cô sửa; bài mẫu cô đã sửa thì lưu thành bài mới của cô.
+      try {
+        const lesson = { ...draft, level };
+        if (draft.libId) {
+          await saveToLibrary(draft.libId, lesson, false);
+          await markLibraryUsed(draft.libId, library[draft.libId]?.usedCount || 0);
+        } else if (draft.sampleId) {
+          const s = SAMPLE_LESSONS[draft.sampleId];
+          if (s && (s.readingText !== draft.readingText.trim() || s.topic !== draft.topic.trim() || s.translation !== draft.translation.trim())) {
+            const lid = newLibraryId();
+            await saveToLibrary(lid, lesson, true);
+            await markLibraryUsed(lid, 0);
+          }
+        }
+      } catch { /* lỗi lưu kho không chặn việc giao bài */ }
       setDraft(null); setInput(''); setNote('');
       setSavedMsg('Đã giao bài cho cả lớp. Học sinh mở app là thấy ngay, không cần API key.');
     } catch (e: any) { onError(e.message); } finally { setBusy(''); }
   };
 
+  const wc = (t: string) => t.split(/\s+/).filter(Boolean).length;
+  const LessonRow: React.FC<{ id: string; l: { topic: string; readingText: string; theme?: string; usedCount?: number }; origin: Draft['origin'] }> = ({ id, l, origin }) => (
+    <li className="px-2 py-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <button onClick={() => setPeek(peek === id ? null : id)} className="min-w-0 text-left flex-1">
+          <p className="font-bold text-slate-800 truncate">{l.topic}</p>
+          <p className="text-xs text-slate-500 truncate">
+            {origin === 'sample' ? (l.theme || 'Bài mẫu') : 'Cô đã tạo'} · {wc(l.readingText)} từ
+            {l.usedCount ? ` · đã giao ${l.usedCount} lần` : ''}
+          </p>
+        </button>
+        <button onClick={() => openLesson(origin === 'sample' ? SAMPLE_LESSONS[id] : library[id], origin, id)}
+          className="shrink-0 px-3 py-1.5 rounded-lg bg-brand-green text-white text-xs font-black">Xem & giao</button>
+        {origin === 'saved' && (
+          <button title="Xoá khỏi kho (không ảnh hưởng bài đã giao)"
+            onClick={() => { if (confirm(`Xoá bài "${l.topic}" khỏi kho của cô? Bài đã giao cho lớp vẫn giữ nguyên.`)) removeFromLibrary(id); }}
+            className="shrink-0 p-1.5 text-slate-300 hover:text-red-600"><Trash2 size={14} /></button>
+        )}
+      </div>
+      {peek === id && <p className="mt-2 text-sm leading-relaxed text-slate-600 whitespace-pre-wrap bg-slate-50 rounded-xl p-3">{l.readingText}</p>}
+    </li>
+  );
+
   return (
     <div className="space-y-4">
       <div className="bg-white rounded-3xl shadow-xl border-4 border-emerald-100 p-4 sm:p-5 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <p className="text-xs font-black text-emerald-600 uppercase tracking-wider">Tạo bài nói và giao cho cả lớp</p>
-          {!hasKey && (
+          <p className="text-xs font-black text-emerald-600 uppercase tracking-wider">Chọn bài nói và giao cho cả lớp</p>
+          {!hasKey && mode !== 'library' && (
             <button onClick={onNeedKey} className="flex items-center gap-1 text-xs font-black px-3 py-1.5 rounded-lg bg-amber-100 text-amber-800">
               <Zap size={14} /> Cô nhập API key Gemini để tạo bài
             </button>
           )}
         </div>
-        <div className="flex gap-2 bg-slate-100 p-1 rounded-xl text-xs sm:text-sm">
-          {([['generate', '💡 AI tạo bài theo chủ đề'], ['useInput', '📝 Dùng đoạn văn của cô']] as const).map(([m, label]) => (
+        <div className="flex gap-1 sm:gap-2 bg-slate-100 p-1 rounded-xl text-xs sm:text-sm">
+          {([['library', '📚 Kho bài'], ['generate', '💡 AI tạo bài'], ['useInput', '📝 Đoạn văn của cô']] as const).map(([m, label]) => (
             <button type="button" key={m} onClick={() => setMode(m)}
-              className={`flex-1 py-2 rounded-lg font-black ${mode === m ? 'bg-white shadow text-brand-green-dark' : 'text-slate-500'}`}>{label}</button>
+              className={`flex-1 py-2 px-1 rounded-lg font-black ${mode === m ? 'bg-white shadow text-brand-green-dark' : 'text-slate-500'}`}>{label}</button>
           ))}
         </div>
-        {mode === 'generate' ? (
+        <div className="flex flex-wrap gap-2">
+          {LEVELS.map(l => (
+            <button type="button" key={l} onClick={() => setLevel(l)} title={LEVEL_INFO[l]?.desc}
+              className={`px-3 py-1.5 rounded-lg text-xs font-black border ${level === l ? 'bg-brand-green text-white border-brand-green' : 'border-slate-200 text-slate-600'}`}>
+              {l}{mode === 'library' && <span className="ml-1 opacity-70">{5 + countMine(l)}</span>}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-slate-400">{LEVEL_INFO[level]?.label} — {LEVEL_INFO[level]?.desc}</p>
+        {mode === 'library' ? (
+          <div className="space-y-3">
+            <div className="rounded-2xl border border-emerald-100">
+              <p className="px-3 pt-2.5 text-[11px] font-black text-emerald-700 uppercase tracking-wider">⭐ Bài mẫu chuẩn ({samples.length})</p>
+              <ul className="divide-y divide-slate-100 px-1">
+                {samples.map(([id, l]) => <LessonRow key={id} id={id} l={l} origin="sample" />)}
+              </ul>
+            </div>
+            <div className="rounded-2xl border border-amber-100">
+              <p className="px-3 pt-2.5 text-[11px] font-black text-amber-700 uppercase tracking-wider">✍️ Bài cô đã tạo ({mine.length})</p>
+              {mine.length === 0 ? (
+                <p className="px-3 py-3 text-xs text-slate-400">Chưa có. Mỗi bài cô tạo bằng AI sẽ tự lưu vào đây để dùng lại cho lớp khác.</p>
+              ) : (
+                <ul className="divide-y divide-slate-100 px-1">
+                  {mine.map(([id, l]) => <LessonRow key={id} id={id} l={l} origin="saved" />)}
+                </ul>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400">Giao bài từ kho không cần API key. Bài mẫu soạn theo chủ đề và độ khó của Cambridge YLE (Starters–Flyers) và CEFR (A1–B2).</p>
+          </div>
+        ) : mode === 'generate' ? (
           <input value={input} onChange={e => setInput(e.target.value)} placeholder="Chủ đề hoặc từ vựng, VD: My family; cake, picture, seven"
             className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
         ) : (
           <textarea value={input} onChange={e => setInput(e.target.value)} rows={5} placeholder="Dán đoạn văn tiếng Anh cô muốn học sinh đọc (giữ nguyên từng chữ)"
             className="w-full px-3 py-2.5 text-sm border-2 border-emerald-100 rounded-xl focus:outline-none focus:border-brand-green" />
         )}
-        <div className="flex flex-wrap gap-2">
-          {LEVELS.map(l => (
-            <button type="button" key={l} onClick={() => setLevel(l)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-black border ${level === l ? 'bg-brand-green text-white border-brand-green' : 'border-slate-200 text-slate-600'}`}>
-              {l}
-            </button>
-          ))}
-        </div>
-        <button onClick={generate} disabled={!!busy}
-          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-brand-green text-white font-black text-sm disabled:opacity-60">
-          {busy === 'gen' ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />}
-          {busy === 'gen' ? 'AI đang soạn bài...' : draft ? 'Tạo lại bài khác' : 'Tạo bài bằng AI'}
-        </button>
+        {mode !== 'library' && (
+          <button onClick={generate} disabled={!!busy}
+            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-brand-green text-white font-black text-sm disabled:opacity-60">
+            {busy === 'gen' ? <RefreshCw size={16} className="animate-spin" /> : <Sparkles size={16} />}
+            {busy === 'gen' ? 'AI đang soạn bài...' : draft?.origin === 'ai' ? 'Tạo lại bài khác' : 'Tạo bài bằng AI'}
+          </button>
+        )}
         {savedMsg && <p className="text-sm font-bold text-emerald-700 flex items-center gap-1"><Check size={16} /> {savedMsg}</p>}
       </div>
 
       {draft && (
-        <div className="bg-white rounded-3xl shadow-xl border-4 border-amber-200 p-4 sm:p-5 space-y-3">
-          <p className="text-xs font-black text-amber-700 uppercase tracking-wider">Xem lại và sửa trước khi giao</p>
+        <div id="assign-draft" className="bg-white rounded-3xl shadow-xl border-4 border-amber-200 p-4 sm:p-5 space-y-3 scroll-mt-24">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-black text-amber-700 uppercase tracking-wider">Xem lại và sửa trước khi giao · {level}</p>
+            <span className="text-[11px] font-black px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
+              {draft.origin === 'sample' ? '⭐ Bài mẫu chuẩn' : '✓ Đã lưu vào kho của cô'}
+            </span>
+          </div>
           <label className="block space-y-1">
             <span className="text-[11px] font-black text-slate-500 uppercase">Tên bài</span>
             <input value={draft.topic} onChange={e => setDraft({ ...draft, topic: e.target.value })}
@@ -502,7 +599,7 @@ const AssignTab: React.FC<{
             <button onClick={assign} disabled={!!busy} className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-brand-green text-white font-black text-sm disabled:opacity-60">
               {busy === 'save' ? <RefreshCw size={16} className="animate-spin" /> : <Check size={16} />} Giao bài cho lớp
             </button>
-            <button onClick={() => setDraft(null)} className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">Bỏ bài này</button>
+            <button onClick={() => setDraft(null)} className="px-4 py-2.5 rounded-xl bg-slate-100 text-slate-600 font-black text-sm">Đóng</button>
           </div>
         </div>
       )}

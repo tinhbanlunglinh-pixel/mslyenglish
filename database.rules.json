@@ -12,6 +12,17 @@
             ".write": true,
             ".validate": "!newData.exists() || newData.hasChildren(['name'])"
           }
+        },
+        "library": {
+          "$lid": {
+            ".write": true,
+            ".validate": "!newData.exists() || (newData.hasChildren(['topic', 'level', 'readingText']) && $lid.matches(/^l_[0-9a-z_]{1,40}$/))",
+            "topic": { ".validate": "newData.isString() && newData.val().length <= 200" },
+            "level": { ".validate": "newData.isString() && newData.val().length <= 20" },
+            "readingText": { ".validate": "newData.isString() && newData.val().length <= 6000" },
+            "translation": { ".validate": "newData.isString() && newData.val().length <= 8000" },
+            "usedCount": { ".validate": "newData.isNumber()" }
+          }
         }
       }
     },

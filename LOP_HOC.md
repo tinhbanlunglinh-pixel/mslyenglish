@@ -4,7 +4,12 @@ Web: https://mslyenglish.vercel.app · Firebase: dự án `mslyenglish-app` (Rea
 
 ## Luồng sử dụng
 1. **Giáo viên** đăng nhập bằng mật khẩu → tạo lớp → nhận **mã lớp 6 ký tự** và link `/?lop=MÃ` gửi phụ huynh.
-2. **Giao bài nói**: cô nhập API key Gemini (lưu trên máy cô) → AI tạo bài theo chủ đề hoặc dùng đoạn văn của cô → xem/sửa → giao cả lớp.
+2. **Giao bài nói** (3 cách):
+   - **📚 Kho bài** — không cần API key: 35 bài mẫu chuẩn (5 bài × 7 trình độ Starters, Movers, Flyers, A1, A2, B1, B2;
+     file `src/data/sampleLessons.ts`) + mọi bài cô đã tạo trước đó.
+   - **💡 AI tạo bài / 📝 Đoạn văn của cô** — cần API key Gemini (lưu trên máy cô). Bài tạo xong **tự lưu vào kho**
+     (bấm "Tạo lại" thì ghi đè bản nháp đó, không sinh bài rác); khi giao, phần cô sửa cũng được lưu.
+   - Sửa bài mẫu rồi giao → lưu thành bài mới của cô.
 3. **Học sinh** nhập mã lớp + họ tên → *Bài cô giao* → nghe mẫu (giọng đọc của trình duyệt) → ghi âm → nộp. **Không cần API key.**
 4. **Chấm & báo cáo**: khi cô mở Bảng giáo viên, bài mới nộp của lớp đang chọn được tự chấm trên máy cô bằng key của cô
    (hàm `evaluateSpeech`), lưu điểm + lời nhận xét theo mẫu. Cô xuất **ảnh báo cáo** (Tải ảnh / Chép ảnh / Chép chữ) gửi phụ huynh.
@@ -30,6 +35,7 @@ Ngoài ra vẫn có *Phòng luyện nói tự do* (app gốc, cần API key riê
 ## Cấu trúc dữ liệu (Realtime Database)
 ```
 teachers/msly/{passHash, callName, classes/{MÃ}: {name}}
+teachers/msly/library/{lid}  {topic, level, readingText, translation, vocabulary[], createdAt, usedCount}  ← kho bài của cô
 classes/{MÃ}/
   info          {name, teacher, createdAt}
   students/{sid}            {name, joinedAt, lastActive}
