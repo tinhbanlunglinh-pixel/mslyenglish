@@ -168,8 +168,26 @@ export const getAiProvider = (): AiProvider => {
   return "gemini";
 };
 
+// Key tạm do "tạo giọng hàng loạt" chọn từ bảng key dự phòng của cô (không ghi đè key chính)
+let keyOverride: string | null = null;
+export const setKeyOverride = (k: string | null) => { keyOverride = k; };
+
+const KEY_POOL = 'gemini_key_pool';
+/** Bảng key Gemini dự phòng — cô tự dán, chỉ lưu trên máy cô */
+export const getGeminiKeyPool = (): string[] => {
+  try {
+    return (localStorage.getItem(KEY_POOL) || '').split(/\s+/).map(k => k.trim()).filter(k => isValidGoogleAiApiKey(k));
+  } catch { return []; }
+};
+export const setGeminiKeyPool = (text: string): number => {
+  const keys = Array.from(new Set(text.split(/[\s,;]+/).map(k => k.trim()).filter(k => isValidGoogleAiApiKey(k))));
+  try { keys.length ? localStorage.setItem(KEY_POOL, keys.join('\n')) : localStorage.removeItem(KEY_POOL); } catch { /* bỏ qua */ }
+  return keys.length;
+};
+
 export const getApiKeyForProvider = (provider?: AiProvider): string => {
   const currentProvider = provider || getAiProvider();
+  if (keyOverride && currentProvider === "gemini") return keyOverride;
   if (typeof window !== "undefined") {
     if (currentProvider === "agent-platform") {
       const apKey = localStorage.getItem(STORAGE_KEYS.AGENT_PLATFORM_KEY);

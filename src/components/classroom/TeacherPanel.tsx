@@ -16,6 +16,7 @@ import {
 import { LessonCard, RecorderPreview } from './LessonCard';
 import { VoiceSettings } from './VoiceSettings';
 import { getTtsProvider } from '../../services/elevenlabs';
+import { getGeminiKeyPool, setKeyOverride, getApiKeyForProvider as mainKey } from '../../services/geminiService';
 import { makeLessonImage, makeLessonAudio } from '../../utils/lessonMedia';
 import { SAMPLE_LESSONS, LEVEL_INFO } from '../../data/sampleLessons';
 
@@ -438,29 +439,39 @@ const AssignTab: React.FC<{
 
   /** Tạo giọng Leda cho mọi bài mẫu còn thiếu (key của cô), lần lượt từng bài */
   const runBulk = async () => {
-    if (!hasKey && getTtsProvider() !== 'elevenlabs') { onNeedKey(); return; }
+    const useEl = getTtsProvider() === 'elevenlabs';
+    // Danh sách key Gemini: key chính trước, rồi bảng key dự phòng
+    const keys = useEl ? [''] : Array.from(new Set([mainKey(), ...getGeminiKeyPool()].filter(Boolean)));
+    if (!useEl && !keys.length) { onNeedKey(); return; }
     const todo = sampleIds.filter(id => !sampleDone[id]);
     if (!todo.length) return;
     bulkStop.current = false;
-    let done = 0, fails = 0, lastErr = '';
+    let done = 0, fails = 0, lastErr = '', ki = 0, i = 0;
+    if (!useEl) setKeyOverride(keys[0]);
     setBulk({ running: true, done: 0, total: todo.length });
-    for (const id of todo) {
-      if (bulkStop.current) break;
-      const l = SAMPLE_LESSONS[id];
-      setBulk({ running: true, done, total: todo.length, current: `${l.level} · ${l.topic}` });
-      const b64 = await makeLessonAudio(l.readingText, l.level).catch((e: any) => { lastErr = e?.message || ''; return null; });
-      if (b64) {
-        try { await saveSampleAudio(id, b64); done++; fails = 0; } catch { fails++; }
-      } else fails++;
-      if (fails >= 2) {
-        setBulk({ running: false, done, total: todo.length,
-          msg: (lastErr ? `Tạm dừng: ${lastErr} ` : 'Tạm dừng: key của cô đang hết lượt tạo giọng hoặc chưa hỗ trợ giọng AI. ') + 'Bài đã tạo được giữ lại — lúc khác cô bấm lại để làm tiếp.' });
-        return;
+    try {
+      while (i < todo.length && !bulkStop.current) {
+        const id = todo[i];
+        const l = SAMPLE_LESSONS[id];
+        const keyNote = !useEl && keys.length > 1 ? ` · key ${ki + 1}/${keys.length}` : '';
+        setBulk({ running: true, done, total: todo.length, current: `${l.level} · ${l.topic}${keyNote}` });
+        const b64 = await makeLessonAudio(l.readingText, l.level).catch((e: any) => { lastErr = e?.message || ''; return null; });
+        let ok = false;
+        if (b64) { try { await saveSampleAudio(id, b64); ok = true; } catch { /* lỗi mạng */ } }
+        if (ok) { done++; fails = 0; i++; }
+        else if (!useEl && ki < keys.length - 1) {
+          // key này hết lượt → sang key kế tiếp, làm lại đúng bài này
+          ki++; setKeyOverride(keys[ki]); fails = 0; continue;
+        } else if (++fails >= 2) {
+          setBulk({ running: false, done, total: todo.length,
+            msg: (lastErr ? `Tạm dừng: ${lastErr} ` : `Tạm dừng: ${keys.length > 1 ? `cả ${keys.length} key` : 'key của cô'} đều đang hết lượt tạo giọng. `) + 'Bài đã tạo được giữ lại — lúc khác cô bấm lại để làm tiếp.' });
+          return;
+        }
+        await new Promise(res => setTimeout(res, 2500));
       }
-      await new Promise(res => setTimeout(res, 2500));
-    }
-    setBulk({ running: false, done, total: todo.length,
-      msg: bulkStop.current ? 'Đã dừng. Bài đã tạo được giữ lại.' : `Xong: đã tạo giọng AI cho ${done} bài mẫu.` });
+      setBulk({ running: false, done, total: todo.length,
+        msg: bulkStop.current ? 'Đã dừng. Bài đã tạo được giữ lại.' : `Xong: đã tạo giọng AI cho ${done} bài mẫu.` });
+    } finally { setKeyOverride(null); }
   };
   const list = (Object.entries(data.assignments) as [string, Assignment][]).sort((a, b) => (b[1].createdAt || 0) - (a[1].createdAt || 0));
 

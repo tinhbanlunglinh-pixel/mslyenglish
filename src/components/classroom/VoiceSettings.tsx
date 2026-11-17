@@ -3,6 +3,7 @@ import { RefreshCw, Check } from 'lucide-react';
 import {
   ElVoice, TtsProvider, elRemaining, getElKey, getElVoice, getTtsProvider, listElVoices, setElKey, setElVoice, setTtsProvider,
 } from '../../services/elevenlabs';
+import { getGeminiKeyPool, setGeminiKeyPool } from '../../services/geminiService';
 
 /** Chọn nguồn giọng đọc AI: Leda (Gemini, key Gemini của cô) hoặc ElevenLabs (key ElevenLabs của cô). */
 export const VoiceSettings: React.FC<{ onChange?: (p: TtsProvider) => void }> = ({ onChange }) => {
@@ -14,6 +15,9 @@ export const VoiceSettings: React.FC<{ onChange?: (p: TtsProvider) => void }> = 
   const [left, setLeft] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [poolCount, setPoolCount] = useState(getGeminiKeyPool().length);
+  const [poolText, setPoolText] = useState('');
+  const [poolOpen, setPoolOpen] = useState(false);
 
   const load = async (k: string) => {
     setBusy(true); setErr(null);
@@ -40,6 +44,25 @@ export const VoiceSettings: React.FC<{ onChange?: (p: TtsProvider) => void }> = 
             className={`px-2.5 py-1 rounded-lg font-black border ${provider === p ? 'bg-brand-green text-white border-brand-green' : 'border-slate-200 text-slate-600'}`}>{label}</button>
         ))}
       </div>
+      {provider === 'gemini' && (
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold text-slate-600">🔑 Bảng key dự phòng: <b>{poolCount}</b> key</span>
+            <button onClick={() => setPoolOpen(o => !o)} className="underline text-slate-500">{poolOpen ? 'Đóng' : poolCount ? 'Thay bảng key' : 'Dán bảng key'}</button>
+            {poolCount > 0 && <button onClick={() => setPoolCount(setGeminiKeyPool(''))} className="underline text-slate-400">Xoá bảng</button>}
+          </div>
+          {poolOpen && (
+            <div className="space-y-1.5">
+              <textarea value={poolText} onChange={e => setPoolText(e.target.value)} rows={4} autoComplete="off" spellCheck={false}
+                placeholder={'Dán các key Gemini của cô, mỗi dòng một key (AIzaSy... hoặc AQ...)'}
+                className="w-full px-2.5 py-1.5 border-2 border-slate-200 rounded-lg font-mono text-[11px]" />
+              <button onClick={() => { setPoolCount(setGeminiKeyPool(poolText)); setPoolText(''); setPoolOpen(false); }}
+                className="px-3 py-1.5 rounded-lg bg-brand-green text-white font-black">Lưu bảng key</button>
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400">Khi tạo giọng hàng loạt, key nào hết lượt thì tự chuyển sang key kế tiếp. Bảng key chỉ lưu trên máy này.</p>
+        </div>
+      )}
       {provider === 'elevenlabs' && (
         <div className="space-y-2">
           {!key ? (
